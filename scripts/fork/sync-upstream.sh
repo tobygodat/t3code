@@ -6,9 +6,9 @@
 #
 # Exit codes:
 #   0  already up to date, or upstream merged and pushed to origin/main
-#   1  git failed, for example a fetch error or a push rejected because
-#      origin/main moved during the run
 #   2  the merge conflicts; the conflicted paths go to stderr and nothing is pushed
+#   other non-zero  git failed, for example a fetch error or a push rejected
+#                   because origin/main moved during the run; retry
 set -eu
 
 upstream_url="https://github.com/pingdotgg/t3code.git"
@@ -46,7 +46,7 @@ else
     echo "$result" | tail -n +2 >&2
     exit 2
   elif [ "$status" -ne 0 ]; then
-    exit 1
+    exit "$status"
   fi
   merged=$(git commit-tree "$result" -p "$ours" -p "$theirs" \
     -m "Merge upstream pingdotgg/t3code main ($theirs_short)")
