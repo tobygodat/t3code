@@ -6,7 +6,9 @@
 #
 # Exit codes:
 #   0  already up to date, or upstream merged and pushed to origin/main
-#   1  the merge conflicts; the conflicted paths go to stderr and nothing is pushed
+#   1  git failed, for example a fetch error or a push rejected because
+#      origin/main moved during the run
+#   2  the merge conflicts; the conflicted paths go to stderr and nothing is pushed
 set -eu
 
 upstream_url="https://github.com/pingdotgg/t3code.git"
@@ -36,9 +38,14 @@ if git merge-base --is-ancestor "$ours" "$theirs"; then
   # The fork has no commits of its own past upstream, so fast-forward.
   merged=$theirs
 else
-  if ! result=$(git merge-tree --write-tree --name-only --no-messages "$ours" "$theirs"); then
+  # merge-tree exits 1 on conflicts and above 1 on errors.
+  status=0
+  result=$(git merge-tree --write-tree --name-only --no-messages "$ours" "$theirs") || status=$?
+  if [ "$status" -eq 1 ]; then
     echo "Merging upstream $theirs_short conflicts in:" >&2
     echo "$result" | tail -n +2 >&2
+    exit 2
+  elif [ "$status" -ne 0 ]; then
     exit 1
   fi
   merged=$(git commit-tree "$result" -p "$ours" -p "$theirs" \

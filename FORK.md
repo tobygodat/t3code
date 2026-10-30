@@ -14,7 +14,8 @@ This is Toby's fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code), 
 `scripts/fork/sync-upstream.sh` fetches upstream and merges it into `origin/main`. It works on refs only, so your checkout and current branch stay as they are. A T3 Code scheduled task runs it every morning.
 
 - Exit 0: already up to date, or the merge was pushed. Run `git pull` on your local `main` to catch up.
-- Exit 1: the merge conflicts. It lists the conflicted files and pushes nothing. To resolve by hand:
+- Exit 1: git itself failed, such as a fetch error or a push rejected because `origin/main` moved mid-run. Run it again.
+- Exit 2: the merge conflicts. It lists the conflicted files and pushes nothing. To resolve by hand:
 
   ```sh
   git fetch upstream main
