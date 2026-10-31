@@ -250,6 +250,10 @@ if [ "$force" -eq 0 ]; then
   fi
 fi
 
+# A copy running from previous blocks the swap, so a build now would only wait. Say so first.
+! running_from "$releases/previous" ||
+  die "A copy of $app_name runs from $releases/previous. Quit it, then run this again."
+
 if [ -d "$worktree" ]; then
   # A build left running by a killed run still works here; resetting under it would break both.
   users=$(lsof -a -d cwd -Fpn 2>/dev/null | awk -v dir="$worktree" '
