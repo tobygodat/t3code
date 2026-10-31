@@ -7,19 +7,26 @@
 #   scripts/fork/release-desktop.sh --install-staged
 #
 #   --ref             build this commit instead of origin/main
-#   --force           build even if the commit was already built
+#   --force           build even if the installed or staged app is that commit
 #   --install-staged  install a build left staged while the app ran; no build
 #
-# Builds run in a detached worktree, t3code-release, next to the main checkout.
-# State lives in ~/.t3-fork/releases: last-built (commit), pending (a staged
-# version waiting for the app to quit), previous (the bundle last replaced),
-# build.log, and one folder per version.
+# Builds run in a detached worktree, t3code-release, next to the main checkout
+# (T3_FORK_RELEASE_WORKTREE overrides the path). State lives in
+# ~/.t3-fork/releases: pending (a staged version waiting for the app to quit),
+# previous (the bundle last replaced), build.log, and one folder per version.
+# Each bundle records its commit as T3ForkCommit in Info.plist.
+#
+# Signing uses the identity from scripts/fork/create-signing-identity.sh when
+# it exists, and an ad-hoc signature otherwise.
 #
 # Exit codes:
 #   0   installed, or already up to date
+#   64  bad arguments
+#   73  another release run holds the lock; nothing was done
 #   75  built and staged, but the fork app is running; quit it and run again,
 #       or wait for the next scheduled run
-#   other non-zero  the build, patch or install failed; see build.log
+#   1   anything else failed; see build.log. Every exit other than 0, 73 and 75
+#       posts a macOS notification.
 set -eu
 
 app_name="T3 Code Fork"
@@ -27,42 +34,121 @@ bundle_id="com.tobygodat.t3code.fork"
 fork_home="$HOME/.t3-fork"
 releases="$fork_home/releases"
 install_path="$HOME/Applications/$app_name.app"
+swap_old="$releases/.swap-old.app"
+signing_dir="$fork_home/signing"
+signing_identity="T3 Code Fork Local Signing"
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 plist_buddy=/usr/libexec/PlistBuddy
-staged_while_running=75
+exit_usage=64
+exit_busy=73
+exit_staged=75
+lock_grace_seconds=60
+
+notify() {
+  osascript -e "display notification \"$1\" with title \"$app_name\"" >/dev/null 2>&1 || true
+}
+
+die() {
+  echo "$1" >&2
+  exit 1
+}
+
+lock="$releases/.lock"
+lock_held=0
+on_exit() {
+  status=$?
+  [ "$lock_held" -eq 0 ] || rm -rf "$lock"
+  case $status in
+    0 | "$exit_busy" | "$exit_staged") ;;
+    *) notify "Release failed (exit $status). See $releases/build.log." ;;
+  esac
+}
+trap on_exit EXIT
+trap 'exit 130' INT TERM HUP
+
+usage() {
+  echo "Usage: $0 [--ref <commit-ish>] [--force] | --install-staged" >&2
+  exit "$exit_usage"
+}
 
 ref=origin/main
 force=0
 install_only=0
 while [ $# -gt 0 ]; do
   case $1 in
-    --ref) ref=$2; shift 2 ;;
+    --ref)
+      [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || usage
+      ref=$2
+      shift 2
+      ;;
     --force) force=1; shift ;;
     --install-staged) install_only=1; shift ;;
-    *) echo "Unknown argument: $1" >&2; exit 64 ;;
+    *) echo "Unknown argument: $1" >&2; usage ;;
   esac
 done
 
-notify() {
-  osascript -e "display notification \"$1\" with title \"$app_name\"" >/dev/null 2>&1 || true
+running_from() {
+  ps -axo comm= | grep -qF "$1/"
 }
 
 fork_app_running() {
-  ps -axo comm= | grep -qF "$install_path/"
+  running_from "$install_path" || running_from "$releases"
 }
 
-mkdir -p "$releases"
-if ! mkdir "$releases/.lock" 2>/dev/null; then
-  holder=$(cat "$releases/.lock/pid" 2>/dev/null || echo "")
-  if [ -n "$holder" ] && kill -0 "$holder" 2>/dev/null; then
-    echo "Another release run ($holder) is in progress." >&2
-    exit 1
+bundle_commit() {
+  "$plist_buddy" -c "Print :T3ForkCommit" "$1/Contents/Info.plist" 2>/dev/null || true
+}
+
+# The lock is a directory holding the owner's PID, moved in whole so it is never empty for long.
+acquire_lock() {
+  mkdir -p "$releases"
+  pid_file="$releases/.lock-pid.$$"
+  echo $$ >"$pid_file"
+  attempt=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    holder=$(cat "$lock/pid" 2>/dev/null || true)
+    if [ -z "$holder" ]; then
+      age=$(($(date +%s) - $(stat -f %m "$lock" 2>/dev/null || date +%s)))
+      [ "$age" -ge "$lock_grace_seconds" ] || lock_busy "a run that is starting"
+    elif ps -p "$holder" -o command= 2>/dev/null | grep -qF release-desktop.sh; then
+      lock_busy "$holder"
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -le 1 ] || lock_busy "unknown"
+    # Recheck the holder right before taking the lock over, so a new owner is never evicted.
+    [ "$(cat "$lock/pid" 2>/dev/null || true)" = "$holder" ] || continue
+    echo "Removing a stale release lock (holder ${holder:-none})." >&2
+    rm -rf "$lock"
+  done
+  lock_held=1
+  mv "$pid_file" "$lock/pid"
+}
+
+lock_busy() {
+  rm -f "$pid_file"
+  echo "Another release run ($1) is in progress." >&2
+  exit "$exit_busy"
+}
+
+# A swap that stopped between its two renames leaves the old bundle in swap_old.
+recover_swap() {
+  [ -d "$swap_old" ] || return 0
+  if [ -d "$install_path" ]; then
+    retire_to_previous
+  else
+    mv "$swap_old" "$install_path"
   fi
-  rm -rf "$releases/.lock"
-  mkdir "$releases/.lock"
-fi
-echo $$ >"$releases/.lock/pid"
-trap 'rm -rf "$releases/.lock"' EXIT
+}
+
+retire_to_previous() {
+  if running_from "$releases/previous"; then
+    echo "A copy of $app_name runs from $releases/previous; keeping the old bundle in $swap_old." >&2
+    return 0
+  fi
+  rm -rf "$releases/previous"
+  mkdir -p "$releases/previous"
+  mv "$swap_old" "$releases/previous/$app_name.app"
+}
 
 install_pending() {
   if [ ! -f "$releases/pending" ]; then
@@ -72,26 +158,29 @@ install_pending() {
   version=$(cat "$releases/pending")
   staged="$releases/$version/$app_name.app"
   if [ ! -d "$staged" ]; then
-    # A run that stopped after moving the bundle into place.
-    if [ -d "$install_path" ]; then
+    staged_commit=$(cat "$releases/$version/commit" 2>/dev/null || true)
+    if [ -n "$staged_commit" ] && [ "$(bundle_commit "$install_path")" = "$staged_commit" ]; then
       rm -f "$releases/pending"
       echo "$app_name $version is already installed."
       return 0
     fi
-    echo "Staged bundle $staged is missing." >&2
-    exit 1
+    die "Staged bundle $staged is missing."
   fi
   if fork_app_running; then
     notify "$version is ready. Quit $app_name to install it."
-    echo "Staged $app_name $version; it installs once $app_name quits."
-    exit "$staged_while_running"
+    echo "Staged $app_name $version; it installs once every copy of $app_name quits."
+    exit "$exit_staged"
   fi
-  rm -rf "$releases/previous"
-  mkdir -p "$releases/previous" "$(dirname "$install_path")"
+  [ ! -e "$swap_old" ] || die "$swap_old is still in use; leaving $version staged."
+  mkdir -p "$(dirname "$install_path")"
   if [ -d "$install_path" ]; then
-    mv "$install_path" "$releases/previous/"
+    mv "$install_path" "$swap_old"
   fi
-  mv "$staged" "$install_path"
+  if ! mv "$staged" "$install_path"; then
+    [ ! -d "$swap_old" ] || mv "$swap_old" "$install_path"
+    die "Could not move $staged into place; restored the previous install."
+  fi
+  [ ! -d "$swap_old" ] || retire_to_previous
   "$lsregister" -f "$install_path"
   rm -f "$releases/pending"
   notify "Installed $version."
@@ -99,44 +188,77 @@ install_pending() {
 }
 
 prune_releases() {
-  pending=$(cat "$releases/pending" 2>/dev/null || echo "")
+  pending=$(cat "$releases/pending" 2>/dev/null || true)
   ls -dt "$releases"/*-preview.* 2>/dev/null | tail -n +3 | while IFS= read -r old; do
-    [ "$(basename "$old")" = "$pending" ] || rm -rf "$old"
+    [ "$(basename "$old")" != "$pending" ] || continue
+    running_from "$old" || rm -rf "$old"
   done
 }
+
+acquire_lock
+recover_swap
 
 if [ "$install_only" -eq 1 ]; then
   install_pending
   exit 0
 fi
 
-script_dir=$(cd "$(dirname "$0")" && pwd)
-cd "$script_dir"
-common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
-worktree="$(dirname "$(dirname "$common_dir")")/t3code-release"
+script_dir=$(cd "$(dirname "$0")" && pwd -P)
+common_dir=$(git -C "$script_dir" rev-parse --path-format=absolute --git-common-dir)
+worktree=${T3_FORK_RELEASE_WORKTREE:-"$(dirname "$(dirname "$common_dir")")/t3code-release"}
 
-git fetch --quiet origin main
-commit=$(git rev-parse --verify "$ref^{commit}")
-short=$(git rev-parse --short "$commit")
+refuse() {
+  die "$1 Refusing to build."
+}
 
-if [ "$force" -eq 0 ] && [ "$(cat "$releases/last-built" 2>/dev/null || echo "")" = "$commit" ]; then
-  if [ -f "$releases/pending" ]; then
+if [ -e "$worktree" ]; then
+  worktree=$(cd "$worktree" && pwd -P)
+  case "$script_dir/" in
+    "$worktree"/*) refuse "This script runs from inside the release worktree $worktree." ;;
+  esac
+  [ "$(git -C "$worktree" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" = "$common_dir" ] ||
+    refuse "$worktree is not a worktree of $(dirname "$common_dir")."
+  [ "$(git -C "$worktree" rev-parse --show-toplevel)" = "$worktree" ] ||
+    refuse "$worktree is inside another checkout, not a worktree of its own."
+  [ "$(git -C "$worktree" rev-parse --path-format=absolute --git-dir)" != "$common_dir" ] ||
+    refuse "$worktree is the main checkout."
+fi
+
+git -C "$script_dir" fetch --quiet origin main
+commit=$(git -C "$script_dir" rev-parse --verify --quiet "$ref^{commit}") || refuse "Unknown ref $ref."
+short=$(git -C "$script_dir" rev-parse --short "$commit")
+
+# Without these, the build would share the official app's T3 home and keychain item.
+for marker in T3CODE_DESKTOP_STAGE_LABEL desktop-env.json; do
+  git -C "$script_dir" grep -qF "$marker" "$commit" -- ":(top)apps/desktop/src" ||
+    refuse "$ref ($short) predates the fork's isolation code ($marker)."
+done
+
+if [ "$force" -eq 0 ]; then
+  pending=$(cat "$releases/pending" 2>/dev/null || true)
+  if [ -n "$pending" ] && [ "$(bundle_commit "$releases/$pending/$app_name.app")" = "$commit" ]; then
     install_pending
-  else
-    echo "$app_name is up to date with $ref ($short)."
+    exit 0
   fi
-  exit 0
+  if [ "$(bundle_commit "$install_path")" = "$commit" ]; then
+    rm -f "$releases/pending"
+    echo "$app_name is up to date with $ref ($short)."
+    exit 0
+  fi
 fi
 
 if [ -d "$worktree" ]; then
   git -C "$worktree" reset --quiet --hard
   git -C "$worktree" checkout --quiet --detach "$commit"
 else
-  git worktree add --quiet --detach "$worktree" "$commit"
+  git -C "$script_dir" worktree prune
+  git -C "$script_dir" worktree add --quiet --detach "$worktree" "$commit"
 fi
+# The desktop build's own lock; any left behind is stale while we hold ours.
+rm -rf "$worktree/.desktop-build.lock"
 
 base_version=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$worktree/apps/server/package.json")
-[ -n "$base_version" ] || { echo "No version in apps/server/package.json." >&2; exit 1; }
+[ -n "$base_version" ] || refuse "No version in apps/server/package.json."
 today=$(date +%Y%m%d)
 last_n=$(ls -d "$releases/$base_version-preview.$today."* 2>/dev/null | sed 's/.*\.//' | sort -n | tail -n 1)
 version="$base_version-preview.$today.$((${last_n:-0} + 1))"
@@ -149,24 +271,26 @@ export PATH
 # The product name sets the bundle, executable and helper names, and the menu bar title.
 desktop_package="$worktree/apps/desktop/package.json"
 sed -i '' "s/^  \"productName\": \".*\"/  \"productName\": \"$app_name\"/" "$desktop_package"
-grep -qF "\"productName\": \"$app_name\"" "$desktop_package" || {
-  echo "Could not set productName in $desktop_package." >&2
-  exit 1
-}
+grep -qF "\"productName\": \"$app_name\"" "$desktop_package" ||
+  refuse "Could not set productName in $desktop_package."
 
 echo "Building $app_name $version from $short. Log: $releases/build.log"
 started=$(date +%s)
 rm -rf "$worktree/release"
-# Without an update repository the build writes no app-update.yml.
+# A caller's T3CODE_DESKTOP_* or GITHUB_REPOSITORY would leak into the build; without an update
+# repository the build writes no app-update.yml.
 if ! (
+  for name in $(env | sed -n 's/^\(T3CODE_DESKTOP_[A-Za-z0-9_]*\)=.*/\1/p'); do
+    unset "$name"
+  done
+  unset GITHUB_REPOSITORY
   cd "$worktree" &&
     vp i --frozen-lockfile &&
-    env -u GITHUB_REPOSITORY -u T3CODE_DESKTOP_UPDATE_REPOSITORY \
-      vp run dist:desktop:artifact --platform mac --target zip --arch arm64 \
+    vp run dist:desktop:artifact --platform mac --target zip --arch arm64 \
       --build-version "$version"
 ) >"$releases/build.log" 2>&1; then
   tail -n 40 "$releases/build.log" >&2
-  notify "Build of $short failed. See $releases/build.log."
+  echo "Build of $short failed." >&2
   exit 1
 fi
 # The build also rewrites package.json versions while it runs.
@@ -178,34 +302,48 @@ rm -rf "$releases"/.tmp-*
 mkdir -p "$tmp"
 ditto -x -k "$zip" "$tmp"
 app="$tmp/$app_name.app"
-[ -d "$app" ] || { echo "The build did not produce $app_name.app." >&2; exit 1; }
+[ -d "$app" ] || refuse "The build did not produce $app_name.app."
 
-if [ -e "$app/Contents/Resources/app-update.yml" ]; then
-  echo "The build contains app-update.yml, so it would auto-update. Refusing to install." >&2
-  exit 1
-fi
+[ ! -e "$app/Contents/Resources/app-update.yml" ] ||
+  refuse "The build contains app-update.yml, so it would auto-update."
+for marker in T3CODE_DESKTOP_STAGE_LABEL desktop-env.json; do
+  grep -qaF "$marker" "$app/Contents/Resources/app.asar" ||
+    refuse "The built app.asar lacks the fork's isolation code ($marker)."
+done
+
+# Read by apps/desktop/src/app/DesktopBundleEnvironment.ts on every launch, however it starts.
+cat >"$app/Contents/Resources/desktop-env.json" <<EOF
+{
+  "T3CODE_HOME": "$fork_home",
+  "T3CODE_DISABLE_AUTO_UPDATE": "1",
+  "T3CODE_DESKTOP_STAGE_LABEL": "Fork"
+}
+EOF
 
 plist="$app/Contents/Info.plist"
 "$plist_buddy" -c "Set :CFBundleIdentifier $bundle_id" "$plist"
 "$plist_buddy" -c "Delete :CFBundleDisplayName" "$plist" 2>/dev/null || true
 "$plist_buddy" -c "Add :CFBundleDisplayName string $app_name" "$plist"
-# Leave t3code:// and web links to the official app.
+# Leave t3code:// links, web links and opening HTML files to the official app.
 "$plist_buddy" -c "Delete :CFBundleURLTypes" "$plist" 2>/dev/null || true
-# Finder and Dock launches get no shell environment, only LSEnvironment.
+"$plist_buddy" -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true
 "$plist_buddy" -c "Delete :LSEnvironment" "$plist" 2>/dev/null || true
-"$plist_buddy" -c "Add :LSEnvironment dict" "$plist"
-"$plist_buddy" -c "Add :LSEnvironment:T3CODE_HOME string $fork_home" "$plist"
-"$plist_buddy" -c "Add :LSEnvironment:T3CODE_DISABLE_AUTO_UPDATE string 1" "$plist"
-"$plist_buddy" -c "Add :LSEnvironment:T3CODE_DESKTOP_STAGE_LABEL string Fork" "$plist"
+"$plist_buddy" -c "Add :T3ForkCommit string $commit" "$plist"
 
-codesign --force --deep --sign - "$app" 2>>"$releases/build.log"
+signing_keychain="$signing_dir/signing.keychain-db"
+if [ -f "$signing_dir/keychain-password" ]; then
+  security unlock-keychain -p "$(cat "$signing_dir/keychain-password")" "$signing_keychain"
+  codesign --force --deep --keychain "$signing_keychain" --sign "$signing_identity" "$app" \
+    2>>"$releases/build.log"
+else
+  codesign --force --deep --sign - "$app" 2>>"$releases/build.log"
+fi
 codesign --verify --deep --strict "$app"
 
 echo "$commit" >"$tmp/commit"
 rm -rf "${releases:?}/$version"
 mv "$tmp" "$releases/$version"
 echo "$version" >"$releases/pending"
-echo "$commit" >"$releases/last-built"
 echo "Built $version from $short in $(($(date +%s) - started))s ($(du -sh "$releases/$version/$app_name.app" | cut -f1))."
 
 prune_releases
