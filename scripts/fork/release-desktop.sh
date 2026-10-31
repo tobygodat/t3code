@@ -216,14 +216,7 @@ if [ -e "$worktree" ]; then
   ! git -C "$worktree" symbolic-ref -q HEAD >/dev/null ||
     refuse "$worktree has a branch checked out, and the release worktree is always detached."
   marker=$(release_marker "$worktree")
-  if [ ! -f "$marker" ]; then
-    # Release worktrees made before the marker existed sit at the default path, detached and clean.
-    [ "$worktree" = "$(cd "$default_worktree" 2>/dev/null && pwd -P)" ] &&
-      [ -z "$(git -C "$worktree" status --porcelain)" ] ||
-      refuse "$worktree was not created by this script (no $marker)."
-    echo "Marking $worktree as the release worktree." >&2
-    : >"$marker"
-  fi
+  [ -f "$marker" ] || refuse "$worktree was not created by this script (no $marker)."
 fi
 
 git -C "$script_dir" fetch --quiet origin main
