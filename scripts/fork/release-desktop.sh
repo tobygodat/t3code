@@ -230,11 +230,12 @@ git -C "$script_dir" fetch --quiet origin main
 commit=$(git -C "$script_dir" rev-parse --verify --quiet "$ref^{commit}") || refuse "Unknown ref $ref."
 short=$(git -C "$script_dir" rev-parse --short "$commit")
 
-# Without these, the build would share the official app's T3 home and keychain item.
-for marker in T3CODE_DESKTOP_STAGE_LABEL desktop-env.json; do
-  git -C "$script_dir" grep -qF "$marker" "$commit" -- ":(top)apps/desktop/src" ||
-    refuse "$ref ($short) predates the fork's isolation code ($marker)."
-done
+# The commit that completes the fork's isolation code; without it, the build would share the
+# official app's T3 home and keychain item. Update it if its branch is rebased or squashed
+# before it reaches main.
+isolation_commit=3952dc1910ffd5f7ee0d233f69fcf45742aade79
+git -C "$script_dir" merge-base --is-ancestor "$isolation_commit" "$commit" ||
+  refuse "$ref ($short) does not contain the fork's isolation code ($isolation_commit)."
 
 if [ "$force" -eq 0 ]; then
   pending=$(cat "$releases/pending" 2>/dev/null || true)
