@@ -13,6 +13,7 @@ import {
   resolveBrowserLinkTargetPreference,
   resolveLinkTarget,
 } from "./browserLinkTarget";
+import { claudeArtifactOpenFor, claudeArtifactsActiveFor } from "./claudeArtifactLinks";
 import { BrowserSettingsReadError, openUrlInPreview } from "./openFileInPreview";
 
 const NO_MODIFIER = { metaKey: false, ctrlKey: false } as const;
@@ -37,9 +38,17 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       event: options.event ?? NO_MODIFIER,
       preference: await resolveBrowserLinkTargetPreference(),
       canOpenInApp: canOpenLinksInApp(targetThreadRef),
+      claudeArtifacts: targetThreadRef
+        ? claudeArtifactsActiveFor(targetThreadRef.environmentId)
+        : false,
     });
     if (target === "app" && targetThreadRef) {
-      const result = await openUrlInPreview({ threadRef: targetThreadRef, url, openPreview });
+      const result = await openUrlInPreview({
+        threadRef: targetThreadRef,
+        url,
+        openPreview,
+        ...claudeArtifactOpenFor(url, targetThreadRef.environmentId),
+      });
       if (isAtomCommandInterrupted(result)) return;
       if (result._tag === "Success") {
         recordVisitForThread(targetThreadRef, url);

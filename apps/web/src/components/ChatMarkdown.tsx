@@ -187,6 +187,7 @@ import {
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
+import { claudeArtifactOpenFor, claudeArtifactsActiveFor } from "../browser/claudeArtifactLinks";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
 import { createMarkdownRenderer } from "./chat/markdownRenderer";
@@ -714,7 +715,12 @@ function useChatMarkdownState({
         ),
       );
     }
-    return openUrlInPreview({ threadRef, url, openPreview }).then((result) => {
+    return openUrlInPreview({
+      threadRef,
+      url,
+      openPreview,
+      ...claudeArtifactOpenFor(url, threadRef.environmentId),
+    }).then((result) => {
       if (result._tag === "Success") recordVisitForThread(threadRef, url);
       else if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
@@ -1185,6 +1191,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
                 event,
                 preference: linkTargetPreference,
                 canOpenInApp: canOpenInPreview,
+                claudeArtifacts: threadRef
+                  ? claudeArtifactsActiveFor(threadRef.environmentId)
+                  : false,
               }) !== "app"
             ) {
               // Open desktop Alt-clicks before Chromium downloads them so link routers can read the held key.

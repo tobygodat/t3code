@@ -5,6 +5,8 @@ import { defaultInstanceIdForDriver, ProviderDriverKind } from "./providerInstan
 import type { ProviderInstanceId } from "./providerInstance.ts";
 import type { ServerProvider } from "./server.ts";
 
+export const CLAUDE_LOGIN_URL = "https://claude.ai/login";
+
 export const ClaudeArtifactId = Schema.String.pipe(Schema.brand("ClaudeArtifactId"));
 export type ClaudeArtifactId = typeof ClaudeArtifactId.Type;
 
