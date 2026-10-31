@@ -166,6 +166,9 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
               ).terminalOpen
             : false,
           previewOpen: readPreviewOpen(),
+          rightPanelOpen: threadRef
+            ? selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, threadRef) !== null
+            : false,
         };
       },
       onKeyDown: (event) => {

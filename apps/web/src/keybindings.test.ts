@@ -644,6 +644,19 @@ describe("resolveShortcutCommand", () => {
     );
   });
 
+  it("starts a chat without a project on desktop mod+t unless the right panel or terminal owns it", () => {
+    const newTab = event({ key: "t", metaKey: true });
+    const resolve = (context: Record<string, boolean>) =>
+      resolveShortcutCommand(newTab, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "MacIntel",
+        context,
+      });
+    assert.strictEqual(resolve({ isDesktop: true }), "chat.newWithoutProject");
+    assert.strictEqual(resolve({ isDesktop: true, rightPanelOpen: true }), "rightPanel.new");
+    assert.isNull(resolve({ isDesktop: true, terminalFocus: true }));
+    assert.isNull(resolve({ isDesktop: false, isWeb: true }));
+  });
+
   it("navigates history with mod+[ and mod+] outside the terminal", () => {
     const back = event({ key: "[", code: "BracketLeft", metaKey: true });
     const forward = event({ key: "]", code: "BracketRight", ctrlKey: true });
