@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { recordVisitForThread } from "~/browserHistoryStore";
+import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readLocalApi } from "~/localApi";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -13,6 +14,11 @@ import {
   resolveBrowserLinkTargetPreference,
   resolveLinkTarget,
 } from "./browserLinkTarget";
+import {
+  CLAUDE_PANEL_OPEN,
+  claudeArtifactsActiveFor,
+  opensAsClaudeArtifact,
+} from "./claudeArtifactLinks";
 import { BrowserSettingsReadError, openUrlInPreview } from "./openFileInPreview";
 
 const NO_MODIFIER = { metaKey: false, ctrlKey: false } as const;
@@ -37,9 +43,18 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       event: options.event ?? NO_MODIFIER,
       preference: await resolveBrowserLinkTargetPreference(),
       canOpenInApp: canOpenLinksInApp(targetThreadRef),
+      claudeArtifacts: targetThreadRef
+        ? claudeArtifactsActiveFor(targetThreadRef.environmentId)
+        : false,
     });
     if (target === "app" && targetThreadRef) {
-      const result = await openUrlInPreview({ threadRef: targetThreadRef, url, openPreview });
+      const claudeDoc = opensAsClaudeArtifact(url, targetThreadRef.environmentId);
+      const result = await openUrlInPreview({
+        threadRef: targetThreadRef,
+        url,
+        openPreview,
+        ...(claudeDoc ? CLAUDE_PANEL_OPEN : {}),
+      });
       if (isAtomCommandInterrupted(result)) return;
       if (result._tag === "Success") {
         recordVisitForThread(targetThreadRef, url);
@@ -47,7 +62,18 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       }
       const failure = squashAtomCommandFailure(result);
       if (failure instanceof BrowserSettingsReadError) throw failure;
+      // The system browser lacks the panel's claude.ai sign-in, so a forced open stops here.
       console.error(result.cause);
+      if (claudeDoc) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not open the claude.ai doc",
+            description: "⌘/Ctrl-click the link to open it in your default browser.",
+          }),
+        );
+        return;
+      }
     }
     const api = readLocalApi();
     if (!api) throw new Error("Link opening is unavailable.");

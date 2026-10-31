@@ -94,6 +94,30 @@ To show Claude task lists in the web and desktop apps, add
 **Environment** section in **Settings > Providers**. Each update shows as a Tasks
 row in the thread; open it to see every step.
 
+## claude.ai docs for other agents
+
+In the desktop app, Codex and other non-Claude agents can create, read and edit your
+claude.ai docs through your own Claude Code login. Turn on **Claude artifacts** in
+**Settings > Browser**. T3 Code saves the setting, then opens claude.ai in the browser
+panel so you can sign in there. Use **Sign in** on that row again if the panel's login
+expires.
+
+It uses two separate logins. Agents reach your docs through a Claude provider signed
+in with a claude.ai account; an API key, Bedrock or a custom endpoint does not work.
+Run `claude /login` if the setting says no account is signed in. The browser panel
+keeps its own claude.ai sign-in, which is what lets doc links open signed in. Links to
+claude.ai docs open in the browser panel even when other links open in your default
+browser. Hold ⌘ or Ctrl while clicking to open one in your default browser.
+
+Edits are checked after Claude Code makes them, not before. If an edit reached another
+doc or its result was lost, the agent hears that and should check the doc on claude.ai.
+
+Agents see the tools in sessions that start after you turn it on. Turning it off
+removes the tools and returns doc links to your usual setting. It does not sign you
+out of claude.ai, in the panel or in Claude Code, or delete docs. To remove the browser sign-in, use **Clear cookies and cache** on the
+Default profile in **Settings > Browser**. Claude threads use claude.ai docs natively and
+never get these tools.
+
 ## OpenRouter
 
 Create a Claude instance with its own config directory, such as

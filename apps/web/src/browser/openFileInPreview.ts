@@ -3,6 +3,7 @@ import type {
   AssetResource,
   EnvironmentId,
   PreviewOpenInput,
+  PreviewRuntime,
   PreviewSessionSnapshot,
   ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -55,6 +56,7 @@ export async function openUrlInPreview<E>(input: {
   readonly url: string;
   readonly openPreview: OpenPreviewMutation<E>;
   readonly profileId?: PreviewOpenInput["profileId"];
+  readonly runtime?: PreviewRuntime;
   readonly background?: boolean;
 }): Promise<AtomCommandResult<void, E | BrowserSettingsReadError>> {
   const defaults = await resolveBrowserDefaults().catch(
@@ -63,7 +65,7 @@ export async function openUrlInPreview<E>(input: {
   if (defaults instanceof BrowserSettingsReadError) {
     return AsyncResult.failure(Cause.fail(defaults));
   }
-  const runtime = previewRuntimeFor(input.threadRef.environmentId);
+  const runtime = input.runtime ?? previewRuntimeFor(input.threadRef.environmentId);
   const previousActiveTabId = readThreadPreviewState(input.threadRef).activeTabId;
   // The server changes the active tab, not panel selection; selection changes come from the user.
   const selectedSurface = () =>

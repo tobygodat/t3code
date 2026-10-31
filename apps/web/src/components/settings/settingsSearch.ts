@@ -913,6 +913,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["links default browser in-app browser external open"],
   },
   {
+    id: "claude-artifacts",
+    title: "Claude artifacts",
+    to: "/settings/browser",
+    desktopOnly: true,
+    searchTerms: ["claude.ai docs documents artifact links codex sign in login connector"],
+  },
+  {
     id: "browser-search-engine",
     title: "Search engine",
     to: "/settings/browser",

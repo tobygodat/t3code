@@ -9,6 +9,7 @@ import {
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
   PreviewTabId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -27,6 +28,11 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../pullRequest/PullRequestReviewGuideService.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import * as ClaudeArtifacts from "../provider/ClaudeArtifacts.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ClaudeArtifactsHandlers from "./toolkits/claudeArtifacts/handlers.ts";
+import { ClaudeArtifactsToolkit } from "./toolkits/claudeArtifacts/tools.ts";
 import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
@@ -1074,6 +1080,153 @@ it.effect("lists pull request watch tools only to threads that are not delegated
       expect(childTools).not.toContain("unwatch_pull_request");
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect.each([
+  { mode: "desktop", offered: ["claude_artifact_read", "claude_artifact_write"] },
+  { mode: "web", offered: [] },
+] as const)(
+  "offers the claude.ai Docs tools on $mode only to non-Claude threads while the setting is on",
+  ({ mode, offered }) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const threadScope = (
+          token: string,
+          instance: string,
+        ): McpInvocationContext.McpThreadInvocationScope => ({
+          environmentId,
+          requestNamespace: token,
+          thread: {
+            threadId: ThreadId.make(`thread-${token}`),
+            providerSessionId: token,
+            providerInstanceId: ProviderInstanceId.make(instance),
+          },
+          client: undefined,
+          capabilities: new Set(),
+          issuedAt: 1,
+        });
+        const scopes = new Map([
+          ["codexToken", threadScope("codexToken", "codex")],
+          ["claudeToken", threadScope("claudeToken", "claudeAgent")],
+        ]);
+        const clientScope: McpInvocationContext.McpInvocationScope = {
+          environmentId,
+          requestNamespace: "client:other",
+          thread: undefined,
+          client: { sessionId: "other", label: "Another MCP client", access: "auto" },
+          capabilities: new Set(),
+          issuedAt: 1,
+        };
+        const settingsContext = yield* Layer.build(ServerSettings.layerTest());
+        const settings = Context.get(settingsContext, ServerSettings.ServerSettingsService);
+        const config = Context.get(
+          yield* Layer.build(
+            ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-claude-artifacts-" }).pipe(
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
+          ServerConfig.ServerConfig,
+        );
+        const artifacts = ClaudeArtifacts.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeedContext(settingsContext),
+              Layer.succeed(ServerConfig.ServerConfig, { ...config, mode }),
+              Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
+                getInstance: (instanceId) =>
+                  Effect.succeed({
+                    driverKind: ProviderDriverKind.make(instanceId),
+                  } as ProviderInstance),
+              }),
+            ),
+          ),
+        );
+        const serverLayer = McpHttpServer.toolkitRegistration(
+          ClaudeArtifactsToolkit,
+          ClaudeArtifactsHandlers.layer,
+        ).pipe(
+          Layer.provideMerge(
+            McpHttpServer.layerMcpTransport.pipe(
+              Layer.provide(Layer.succeedContext(settingsContext)),
+            ),
+          ),
+          Layer.provide(artifacts),
+          Layer.provide(McpToolAccessTestkit.liveThreadsLayer),
+          Layer.provide(
+            Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+              resolve: (token) => Effect.succeed(scopes.get(token)),
+            }),
+          ),
+          Layer.provide(
+            Layer.succeed(McpHttpServer.McpClientAuthenticator, {
+              authenticate: (request) =>
+                Effect.succeed(
+                  request.headers.authorization === "Bearer clientToken" ? clientScope : undefined,
+                ),
+            }),
+          ),
+        );
+        yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+          Layer.build,
+        );
+        const httpClient = yield* HttpClient.HttpClient;
+        const rpc = (token: string, method: string, params: object) =>
+          Effect.gen(function* () {
+            const headers = {
+              accept: "application/json, text/event-stream",
+              authorization: `Bearer ${token}`,
+            };
+            const initialize = yield* httpClient.post("/mcp", {
+              headers,
+              body: HttpBody.text(
+                `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+                "application/json",
+              ),
+            });
+            const response = yield* httpClient.post("/mcp", {
+              headers: {
+                ...headers,
+                "mcp-session-id": initialize.headers["mcp-session-id"]!,
+                "mcp-protocol-version": "2025-06-18",
+              },
+              body: HttpBody.text(
+                JSON.stringify({ jsonrpc: "2.0", id: 2, method, params }),
+                "application/json",
+              ),
+            });
+            return (yield* response.json) as {
+              readonly result?: {
+                readonly tools?: ReadonlyArray<{ readonly name: string }>;
+                readonly isError?: boolean;
+              };
+              readonly error?: { readonly message: string };
+            };
+          });
+        const listed = (token: string) =>
+          rpc(token, "tools/list", {}).pipe(
+            Effect.map((body) => body.result?.tools?.map((tool) => tool.name) ?? []),
+          );
+        const read = (token: string) =>
+          rpc(token, "tools/call", {
+            name: "claude_artifact_read",
+            arguments: { artifact: "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv" },
+          });
+        const hidden = {
+          error: { code: -32602, message: "Tool 'claude_artifact_read' not found" },
+        };
+
+        expect(yield* listed("codexToken")).toEqual([]);
+        expect(yield* read("codexToken")).toMatchObject(hidden);
+
+        yield* settings.updateSettings({ claudeArtifactsEnabled: true });
+        expect(yield* listed("codexToken")).toEqual(offered);
+        expect(yield* listed("claudeToken")).toEqual([]);
+        expect(yield* listed("clientToken")).toEqual([]);
+        if (offered.length === 0) expect(yield* read("codexToken")).toMatchObject(hidden);
+        expect(yield* read("claudeToken")).toMatchObject(hidden);
+        expect(yield* read("clientToken")).toMatchObject(hidden);
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
 it.effect(
