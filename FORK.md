@@ -14,6 +14,7 @@ This is Toby's fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code), 
 `scripts/fork/sync-upstream.sh` fetches upstream and merges it into `origin/main`. It works on refs only, so your checkout and current branch stay as they are. A T3 Code scheduled task runs it every morning.
 
 - Exit 0: already up to date, or the merge was pushed. Run `git pull` on your local `main` to catch up.
+  After a merge it lists the upstream commits that touched fork-owned files (see below), so you can port what you want.
 - Exit 2: the merge conflicts. It lists the conflicted files and pushes nothing. To resolve by hand:
 
   ```sh
@@ -67,11 +68,23 @@ What to expect:
 - Never run `t3 service install` from the fork. The background service shares the official app's launchd label, `com.t3tools.t3code.service`, so it would replace the official service.
 - `open` passes your shell's environment to the app. From a shell inside T3 Code that includes `ELECTRON_RUN_AS_NODE`, so the app runs as plain Node and quits at once. Launch it from the Dock or Finder, or with `env -i HOME="$HOME" open -a "T3 Code Fork"`.
 
-## Keeping conflicts rare
+## Owning files, and keeping conflicts rare
 
-Every line the fork changes in an upstream file can conflict later. So:
+Upstream lands thousands of commits a month, so the fork merges it daily rather than porting by hand. Every line the fork changes in an upstream file can conflict.
+
+For small changes:
 
 - Put styling in new files where you can. For the web app, override the design tokens from `apps/web/src/index.css` in a fork-only stylesheet imported right after it in `apps/web/src/main.tsx`, rather than editing `index.css` in place.
 - Fork-only web UI files, such as that stylesheet and fork components, live in `apps/web/src/fork/`.
 - When you must edit an upstream component, keep the diff small and focused on the UI.
 - Leave upstream docs such as `AGENTS.md` alone. Fork notes go here.
+
+When the fork rewrites an upstream file outright, mark it fork-owned in `.gitattributes`:
+
+```gitattributes
+apps/web/src/fork/rewritten/Example.tsx merge=fork-owned
+```
+
+The sync script defines `fork-owned` as "keep ours". When both sides changed an owned file, the merge keeps the fork's version without a conflict, and the script lists the upstream commits it left out. Port any you want by hand. It reads attributes from `origin/main`'s tree (`git --attr-source`, git 2.42 or newer), so the checkout it runs in doesn't matter.
+
+An owned file still sits among upstream's code. When upstream renames a prop, an import or a type the file uses, the merge stays clean but the file no longer builds. `vp run typecheck` or the release build catches that. Fix it in a follow-up PR on `main`. Own as few files as the change needs, and drop the mark if the fork's version goes back to matching upstream's.
