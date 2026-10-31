@@ -72,8 +72,11 @@ if [ -n "$owned" ]; then
   old_ifs=$IFS
   IFS='
 '
-  # shellcheck disable=SC2086 # one path per line
+  # Split on newlines only, with globbing off, so git gets each path exactly as written.
+  set -f
+  # shellcheck disable=SC2086
   touched=$(git --literal-pathspecs log --no-merges --format='  %h %s' "$base..$theirs" -- $owned)
+  set +f
   IFS=$old_ifs
 fi
 
