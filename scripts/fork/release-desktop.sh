@@ -324,13 +324,14 @@ for marker in T3CODE_DESKTOP_STAGE_LABEL desktop-env.json; do
 done
 
 # Read by apps/desktop/src/app/DesktopBundleEnvironment.ts on every launch, however it starts.
-cat >"$app/Contents/Resources/desktop-env.json" <<EOF
-{
-  "T3CODE_HOME": "$fork_home",
-  "T3CODE_DISABLE_AUTO_UPDATE": "1",
-  "T3CODE_DESKTOP_STAGE_LABEL": "Fork"
-}
-EOF
+# plutil escapes the values, so any home path makes valid JSON.
+env_plist="$tmp/desktop-env.plist"
+plutil -create xml1 "$env_plist"
+plutil -insert T3CODE_HOME -string "$fork_home" "$env_plist"
+plutil -insert T3CODE_DISABLE_AUTO_UPDATE -string 1 "$env_plist"
+plutil -insert T3CODE_DESKTOP_STAGE_LABEL -string Fork "$env_plist"
+plutil -convert json -r -o "$app/Contents/Resources/desktop-env.json" "$env_plist"
+rm "$env_plist"
 
 plist="$app/Contents/Info.plist"
 "$plist_buddy" -c "Set :CFBundleIdentifier $bundle_id" "$plist"
