@@ -33,5 +33,6 @@ This is Toby's fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code), 
 Every line the fork changes in an upstream file can conflict later. So:
 
 - Put styling in new files where you can. For the web app, override the design tokens from `apps/web/src/index.css` in a fork-only stylesheet imported right after it in `apps/web/src/main.tsx`, rather than editing `index.css` in place.
+- Fork-only web UI files, such as that stylesheet and fork components, live in `apps/web/src/fork/`.
 - When you must edit an upstream component, keep the diff small and focused on the UI.
 - Leave upstream docs such as `AGENTS.md` alone. Fork notes go here.
