@@ -24,6 +24,7 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
         appDataDirectory: directory,
         isDevelopment: false,
         platform: "win32",
+        branding: { stageLabel: "Nightly" },
       });
       assert.equal(yield* fs.readFileString(path.join(destination, "Local State")), state);
       assert.equal(yield* fs.readFileString(path.join(source, "Local State")), state);
@@ -33,10 +34,25 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
         appDataDirectory: directory,
         isDevelopment: false,
         platform: "win32",
+        branding: { stageLabel: "Nightly" },
       });
       assert.equal(
         yield* fs.readFileString(path.join(destination, "Local State")),
         "existing V2 state",
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("gives the Fork stage its own profile so it runs beside the official app", () =>
+  Effect.gen(function* () {
+    const resolve = (stageLabel: "Nightly" | "Fork") =>
+      resolveUserDataPath({
+        appDataDirectory: "/Users/alice/Library/Application Support",
+        isDevelopment: false,
+        platform: "darwin",
+        branding: { stageLabel },
+      });
+    assert.equal(yield* resolve("Nightly"), "/Users/alice/Library/Application Support/t3code-v2");
+    assert.equal(yield* resolve("Fork"), "/Users/alice/Library/Application Support/t3code-fork");
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
