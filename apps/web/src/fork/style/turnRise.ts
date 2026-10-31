@@ -53,15 +53,18 @@ const arrivals = new Map<string, number>();
 
 // Memoized rows keep their attributes, so drop the marker once the rise ends or a toggle would replay it.
 if (typeof document !== "undefined") {
-  document.addEventListener("animationend", (event) => {
+  const clearMarker = (event: AnimationEvent) => {
     if (event.animationName === "fork-turn-rise" && event.target instanceof Element) {
       event.target.removeAttribute("data-fork-arrived");
     }
-  });
+  };
+  document.addEventListener("animationend", clearMarker);
+  document.addEventListener("animationcancel", clearMarker);
 }
 
-function lastMessageId(rows: readonly MessagesTimelineRow[]): string | undefined {
-  return rows.findLast((row) => row.kind === "message")?.id;
+/** Changes when rows are added or removed, not when a streaming row grows. */
+function membershipKey(rows: readonly MessagesTimelineRow[]): string {
+  return `${rows.length}:${rows.findLast((row) => row.kind === "message")?.id ?? ""}`;
 }
 
 export function useTurnRise(threadKey: string, rows: readonly MessagesTimelineRow[]): void {
@@ -74,14 +77,18 @@ export function useTurnRise(threadKey: string, rows: readonly MessagesTimelineRo
       snapshot.current = null;
       return;
     }
-    const last = lastMessageId(rows);
-    if (snapshot.current?.threadKey === threadKey && last === lastSeen.current) return;
-    lastSeen.current = last;
+    const membership = membershipKey(rows);
+    if (snapshot.current?.threadKey === threadKey && membership === lastSeen.current) return;
+    lastSeen.current = membership;
+    // No marker when the rise can't play, or it would linger and play once motion is allowed.
+    const canRise =
+      document.visibilityState === "visible" &&
+      !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     snapshot.current = observeTimeline(
       snapshot.current,
       threadKey,
       rows.flatMap((row) => (row.kind === "message" ? [row.id] : [])),
-      { visible: document.visibilityState === "visible", now: performance.now(), arrivals },
+      { visible: canRise, now: performance.now(), arrivals },
     );
   }, [enabled, threadKey, rows]);
 }
