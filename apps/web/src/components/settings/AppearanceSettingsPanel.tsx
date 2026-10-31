@@ -34,6 +34,7 @@ import { searchableSetting } from "./settingsSearch";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
+import { CustomizeSection } from "../../fork/style/CustomizeSection";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
@@ -469,6 +470,7 @@ export function AppearanceSettingsPanel() {
         </AdvancedSettings>
       </SettingsSection>
 
+      <CustomizeSection />
       <TypographySection />
     </SettingsPageContainer>
   );
