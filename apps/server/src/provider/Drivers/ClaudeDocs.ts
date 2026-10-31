@@ -70,8 +70,6 @@ const claudeDocsArgs = (plan: Plan): ReadonlyArray<string> => [
   "--disable-slash-commands",
 ];
 
-// ── Transcript ──────────────────────────────────────────────────────────────
-
 interface DocsCall {
   readonly tool: DocsTool;
   readonly input: unknown;
@@ -164,8 +162,6 @@ export function collectConnectorCalls(
   }
   return { calls, strayTools, cliError };
 }
-
-// ── Connector verdicts ──────────────────────────────────────────────────────
 
 const Frame = Schema.optional(
   Schema.Struct({ slug: Schema.optional(Schema.String), url: Schema.optional(Schema.String) }),
@@ -286,8 +282,6 @@ function readDenial(read: ProjectRead): ClaudeArtifactsError | undefined {
       )
     : refusal(deny);
 }
-
-// ── Interpreters ────────────────────────────────────────────────────────────
 
 export function interpretRead(
   id: ClaudeArtifactId,
@@ -434,8 +428,6 @@ export function interpretEdit(
   return { url: read?.value?.frame?.url ?? claudeArtifactUrl(id) };
 }
 
-// ── Prompts ─────────────────────────────────────────────────────────────────
-
 const PREAMBLE =
   "You run claude.ai Docs tool calls for another program. Load tools with ToolSearch, make exactly the calls below, and write no prose. If a call is refused, stop.";
 const tool = (name: DocsTool) => `${DOCS_TOOL_PREFIX}${name}`;
@@ -473,8 +465,6 @@ const editPrompt = (id: ClaudeArtifactId, instruction: string) =>
     instruction,
     "</instruction>",
   ].join("\n");
-
-// ── Subprocess ──────────────────────────────────────────────────────────────
 
 interface RunOutcome {
   readonly lines: ReadonlyArray<string>;
