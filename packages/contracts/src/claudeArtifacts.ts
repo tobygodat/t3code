@@ -67,7 +67,8 @@ export function pickClaudeDocsInstance(
   return candidates.includes(preferred) ? preferred : [...candidates].sort()[0];
 }
 
-const CLAUDE_ARTIFACT_MAX_MARKDOWN_CHARS = 100_000;
+// Haiku echoes the whole create input back as one tool call, which must finish inside its timeout.
+const CLAUDE_ARTIFACT_MAX_MARKDOWN_CHARS = 30_000;
 
 const ClaudeArtifactRefInput = TrimmedNonEmptyString.check(Schema.isMaxLength(2_048)).annotate({
   description: "The doc's claude.ai link or id.",
