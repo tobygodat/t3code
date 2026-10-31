@@ -26,6 +26,7 @@ import {
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ClaudeArtifacts from "../provider/ClaudeArtifacts.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -77,6 +78,8 @@ import {
 } from "./toolkits/device/tools.ts";
 import * as HtmlHandlers from "./toolkits/html/handlers.ts";
 import { HtmlPreviewTool, HtmlPreviewToolkit, HtmlRenderToolkit } from "./toolkits/html/tools.ts";
+import { ClaudeArtifactsToolkit } from "./toolkits/claudeArtifacts/tools.ts";
+import * as ClaudeArtifactsHandlers from "./toolkits/claudeArtifacts/handlers.ts";
 
 const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
   HttpServerRequest.toURL(request).pipe(
@@ -196,6 +199,7 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
   const registry = yield* McpSessionRegistry.McpSessionRegistry;
   const clients = yield* Effect.serviceOption(McpClientAuthenticator);
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const claudeArtifacts = yield* Effect.serviceOption(ClaudeArtifacts.ClaudeArtifacts);
   const linksEnabled = serverSettings.getSettings.pipe(
     Effect.map((settings) => settings.linkedEnvironmentsEnabled),
     Effect.orElseSucceed(() => false),
@@ -230,6 +234,9 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
       Effect.provideService(McpInvocationContext.McpInvocationContext, {
         ...limited,
         linkedEnvironments,
+        claudeArtifacts: Option.isSome(claudeArtifacts)
+          ? yield* claudeArtifacts.value.offeredTo(limited.thread)
+          : false,
       }),
       Effect.map(normalizeMcpHttpResponse),
     );
@@ -1136,6 +1143,11 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
+const layerClaudeArtifactsToolkit = toolkitRegistration(
+  ClaudeArtifactsToolkit,
+  ClaudeArtifactsHandlers.layer,
+);
+
 export const layerMcpTransport = McpServer.layerHttp({
   name: "T3 Code",
   version: packageJson.version,
@@ -1157,6 +1169,7 @@ export const layerTools = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  layerClaudeArtifactsToolkit,
 );
 
 export const layer = layerTools.pipe(Layer.provideMerge(layerMcpTransport));

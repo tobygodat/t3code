@@ -106,6 +106,8 @@ export interface McpInvocationScope {
   readonly client: McpClientCaller | undefined;
   /** False while the Linked environments beta is off here; `/mcp` reads it per request. */
   readonly linkedEnvironments?: boolean;
+  /** True when this caller gets the claude.ai Docs tools; `/mcp` decides it per request. */
+  readonly claudeArtifacts?: boolean;
 }
 
 /**
@@ -142,6 +144,13 @@ export const hiddenWhileLinksOff = (): boolean => {
   const fiber = Fiber.getCurrent();
   const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
   return scope?.linkedEnvironments !== false;
+};
+
+/** `McpSchema.EnabledWhen` for the claude.ai Docs tools. */
+export const offeredClaudeArtifacts = (): boolean => {
+  const fiber = Fiber.getCurrent();
+  const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
+  return scope?.claudeArtifacts === true;
 };
 
 export type McpCapabilityError<C extends McpCapability> = C extends "preview"
