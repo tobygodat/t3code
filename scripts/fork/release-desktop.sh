@@ -146,6 +146,14 @@ version="$base_version-preview.$today.$((${last_n:-0} + 1))"
 PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
 export PATH
 
+# The product name sets the bundle, executable and helper names, and the menu bar title.
+desktop_package="$worktree/apps/desktop/package.json"
+sed -i '' "s/^  \"productName\": \".*\"/  \"productName\": \"$app_name\"/" "$desktop_package"
+grep -qF "\"productName\": \"$app_name\"" "$desktop_package" || {
+  echo "Could not set productName in $desktop_package." >&2
+  exit 1
+}
+
 echo "Building $app_name $version from $short. Log: $releases/build.log"
 started=$(date +%s)
 rm -rf "$worktree/release"
@@ -161,7 +169,7 @@ if ! (
   notify "Build of $short failed. See $releases/build.log."
   exit 1
 fi
-# The build rewrites package.json versions while it runs.
+# The build also rewrites package.json versions while it runs.
 git -C "$worktree" reset --quiet --hard
 
 zip=$(ls "$worktree"/release/*.zip)
@@ -169,9 +177,8 @@ tmp="$releases/.tmp-$version"
 rm -rf "$releases"/.tmp-*
 mkdir -p "$tmp"
 ditto -x -k "$zip" "$tmp"
-built=$(ls -d "$tmp"/*.app)
 app="$tmp/$app_name.app"
-mv "$built" "$app"
+[ -d "$app" ] || { echo "The build did not produce $app_name.app." >&2; exit 1; }
 
 if [ -e "$app/Contents/Resources/app-update.yml" ]; then
   echo "The build contains app-update.yml, so it would auto-update. Refusing to install." >&2

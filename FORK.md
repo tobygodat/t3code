@@ -35,7 +35,7 @@ The fork installs as **T3 Code Fork** (`~/Applications/T3 Code Fork.app`, bundle
 `scripts/fork/release-desktop.sh` builds and installs it. It needs Rust, which the desktop build compiles its resource monitor with: `brew install rustup`, then `rustup default stable`.
 
 - By default it builds `origin/main`, and skips the build when that commit was already built. `--ref <commit-ish>` builds another commit, and `--force` rebuilds.
-- It builds in a detached `t3code-release` worktree next to the main checkout, then patches the bundle: its own bundle ID, no URL schemes, `LSEnvironment` that sets the data folder, turns off updates and sets `T3CODE_DESKTOP_STAGE_LABEL=Fork`, then an ad-hoc signature.
+- It builds in a detached `t3code-release` worktree next to the main checkout, then patches the bundle: its own bundle ID, no URL schemes, `LSEnvironment` that sets the data folder, turns off updates and sets `T3CODE_DESKTOP_STAGE_LABEL=Fork`, then an ad-hoc signature. The build itself uses the product name T3 Code Fork, so the bundle, its helpers and the menu bar carry that name.
 - While T3 Code Fork runs, the new build waits in `~/.t3-fork/releases` and the script exits 75. Quit the app and run `scripts/fork/release-desktop.sh --install-staged`, or let the next run install it. The bundle it replaced stays in `~/.t3-fork/releases/previous`.
 - Exit 0 means installed or already up to date. Any other code is a failure; `~/.t3-fork/releases/build.log` has the build output.
 
@@ -46,6 +46,8 @@ What to expect:
 - macOS may ask for permissions again after each rebuild, because each ad-hoc signature is new.
 - `t3code://` links and sign-in callbacks open the official app, so cloud sign-in does not work in the fork app.
 - It never updates itself. New builds come only from this script.
+- Settings > About lists the official app's `t3` command and offers to remove it. Leave it: the fork's own launcher is `~/.t3-fork/bin/t3`.
+- `open` passes your shell's environment to the app. From a shell inside T3 Code that includes `ELECTRON_RUN_AS_NODE`, so the app runs as plain Node and quits at once. Launch it from the Dock or Finder, or with `env -i HOME="$HOME" open -a "T3 Code Fork"`.
 
 ## Keeping conflicts rare
 
