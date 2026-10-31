@@ -30,6 +30,3 @@ export const CLAUDE_PANEL_OPEN = {
 /** True when this link must open signed in, in the desktop runtime's Default profile. */
 export const opensAsClaudeArtifact = (url: string, environmentId: EnvironmentId) =>
   claudeArtifactsActiveFor(environmentId) && parseClaudeArtifactUrl(url) !== null;
-
-export const claudeArtifactOpenFor = (url: string, environmentId: EnvironmentId) =>
-  opensAsClaudeArtifact(url, environmentId) ? CLAUDE_PANEL_OPEN : {};

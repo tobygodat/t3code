@@ -187,7 +187,11 @@ import {
   BrowserSettingsReadError,
 } from "../browser/openFileInPreview";
 import { resolveLinkTarget } from "../browser/browserLinkTarget";
-import { claudeArtifactOpenFor, claudeArtifactsActiveFor } from "../browser/claudeArtifactLinks";
+import {
+  CLAUDE_PANEL_OPEN,
+  claudeArtifactsActiveFor,
+  opensAsClaudeArtifact,
+} from "../browser/claudeArtifactLinks";
 import { PullRequestLinkPreview } from "./pullRequest/PullRequestLinkPreview";
 import { MarkdownCodeBlock, SuspenseShikiCodeBlock } from "./chat/MarkdownCodeBlock";
 import { createMarkdownRenderer } from "./chat/markdownRenderer";
@@ -719,7 +723,7 @@ function useChatMarkdownState({
       threadRef,
       url,
       openPreview,
-      ...claudeArtifactOpenFor(url, threadRef.environmentId),
+      ...(opensAsClaudeArtifact(url, threadRef.environmentId) ? CLAUDE_PANEL_OPEN : {}),
     }).then((result) => {
       if (result._tag === "Success") recordVisitForThread(threadRef, url);
       else if (!isAtomCommandInterrupted(result)) {
