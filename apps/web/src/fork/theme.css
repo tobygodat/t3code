@@ -1,6 +1,17 @@
 /* Fork restyle: MonoCode's calm dark surfaces and brighter ink tiers.
    Dark mode on the default theme only. Named themes set data-theme-id and keep their palettes.
    Ink is #ebebeb over #171717, as opaque tiers: 100% #ebebeb, 85% #cbcbcb, 70% #ababab, 60% #969696. */
+:root {
+  /* Keep in sync with THREAD_DETAILS_CARD_WIDTH. */
+  --thread-details-panel-width: 13.75rem;
+}
+
+/* At that width the default bar minimum truncates labels such as "Weekly · Fable". */
+[data-thread-details-card] section[aria-label="Usage"] > .grid {
+  grid-template-columns: auto minmax(2rem, 1fr) auto;
+  column-gap: 0.5rem;
+}
+
 :root.dark:where(:not([data-theme-id]), [data-theme-id=""]) {
   --background: #171717;
   --surface-raised: #1b1b1b;
