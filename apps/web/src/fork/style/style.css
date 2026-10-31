@@ -1,0 +1,194 @@
+/* Ported from MonoCode (MIT, github.com/hardbeat920/monocode). See fork/MONOCODE-LICENSE.
+   Each piece is gated by its token in data-fork-style on <html> (fork/style/features.ts) and
+   applies to the default dark theme only, like fork/theme.css. Unlayered rules here beat
+   Tailwind's layered utilities without !important. */
+:root.dark:where(:not([data-theme-id]), [data-theme-id=""]) {
+  --fork-content: #ebebeb;
+  --fork-ink-50: color-mix(in srgb, var(--fork-content) 50%, transparent);
+  --fork-ink-70: color-mix(in srgb, var(--fork-content) 70%, transparent);
+  --fork-stroke: color-mix(in srgb, var(--fork-content) 10%, transparent);
+  --fork-row-hover: color-mix(in srgb, var(--fork-content) 5%, transparent);
+  --fork-selection: color-mix(in srgb, var(--fork-content) 10%, transparent);
+  --fork-selection-hover: color-mix(in srgb, var(--fork-content) 15%, transparent);
+  --fork-selection-emphasis: color-mix(in srgb, var(--fork-content) 20%, transparent);
+  --fork-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --fork-feedback-duration: 120ms;
+
+  /* MonoCode SecondaryButton and title-bar icon buttons. */
+  &[data-fork-style~="buttons"] {
+    /* Zero Tailwind's shadow layers, not box-shadow itself, so focus rings survive. */
+    & [data-slot="button"],
+    & [data-slot="button"]::before {
+      --tw-shadow: 0 0 #0000;
+      --tw-inset-shadow: 0 0 #0000;
+    }
+
+    & [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]) {
+      border-color: var(--fork-stroke);
+      background-color: transparent;
+      color: var(--fork-ink-70);
+      --control-icon-color: currentColor;
+
+      &:is(:hover, [data-pressed], [data-popup-open]) {
+        background-color: var(--fork-selection);
+        color: var(--fork-content);
+      }
+    }
+
+    & [data-slot="button"]:is([data-variant="ghost"], [data-variant="ghost-muted"]) {
+      color: var(--fork-ink-70);
+      --control-icon-color: currentColor;
+
+      &[data-size^="icon"] {
+        color: var(--fork-ink-50);
+      }
+
+      &:is(:hover, [data-pressed], [data-popup-open]) {
+        background-color: var(--fork-selection);
+        color: var(--fork-content);
+      }
+    }
+  }
+
+  /* MonoCode selection tiers on rows and popup items. */
+  &[data-fork-style~="row-fills"] {
+    & [data-app-sidebar] {
+      --sidebar-row-hover: var(--fork-row-hover);
+      --sidebar-row-selected: var(--fork-selection);
+      --sidebar-row-active: var(--fork-selection);
+    }
+
+    &
+      :is(
+        [data-slot="menu-popup"],
+        [data-slot="select-popup"],
+        [data-slot="popover-popup"],
+        [data-slot="command-dialog-popup"]
+      ) {
+      --accent: var(--fork-selection);
+    }
+
+    & [data-slot="menu-radio-item"][data-checked],
+    & [data-slot="select-item"][data-selected] {
+      background-color: var(--fork-selection);
+    }
+
+    & [data-slot="toggle"]:is([data-pressed], [aria-pressed="true"]) {
+      background-color: var(--fork-selection-emphasis);
+    }
+
+    &
+      :is(
+        [data-slot="menu-item"],
+        [data-slot="menu-checkbox-item"],
+        [data-slot="menu-radio-item"],
+        [data-slot="menu-sub-trigger"],
+        [data-slot="select-item"]
+      ):not([data-density="touch"]) {
+      min-height: 1.75rem;
+      border-radius: 0.5rem;
+      font-size: 13px;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      &
+        :is(
+          [data-sidebar-row],
+          [data-slot="menu-item"],
+          [data-slot="menu-checkbox-item"],
+          [data-slot="menu-radio-item"],
+          [data-slot="menu-sub-trigger"],
+          [data-slot="select-item"],
+          [data-slot="command-item"]
+        ) {
+        transition:
+          background-color var(--fork-feedback-duration) var(--fork-ease-out),
+          opacity 150ms ease;
+      }
+    }
+  }
+
+  /* MonoCode Popover frame over T3's glass fill, which stays readable over busy content. */
+  &[data-fork-style~="glass"] {
+    & .dropdown-glass {
+      --glass-blur: 24px;
+      border-color: var(--fork-stroke);
+      box-shadow:
+        0 20px 25px -5px rgb(0 0 0 / 0.1),
+        0 8px 10px -6px rgb(0 0 0 / 0.1);
+    }
+
+    &
+      :is(
+        [data-slot="menu-popup"],
+        [data-slot="popover-popup"].dropdown-glass,
+        [data-slot="select-popup"],
+        [data-slot="select-popup"] > .dropdown-glass
+      ) {
+      border-radius: 0.75rem;
+    }
+
+    & [data-slot="menu-separator"] {
+      margin-block: 0.25rem;
+      background-color: var(--fork-stroke);
+    }
+
+    & :is([data-slot="menu-label"], [data-slot="select-group-label"]) {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.025em;
+      color: color-mix(in srgb, var(--fork-content) 40%, transparent);
+    }
+  }
+
+  /* MonoCode composer pills and the plain variant for the toolbar under the composer. */
+  &[data-fork-style~="composer-controls"] {
+    & [data-composer-chip="sm"] {
+      height: 1.625rem;
+      gap: 0.25rem;
+      padding-inline: 0.375rem;
+      border-radius: 0.375rem;
+      background-color: var(--fork-selection);
+      color: var(--fork-content);
+      font-size: 11px;
+
+      &:hover {
+        background-color: var(--fork-selection-hover);
+      }
+
+      &:is([data-popup-open], [data-pressed], [aria-pressed="true"]) {
+        background-color: var(--fork-selection-emphasis);
+      }
+
+      & svg[data-composer-control-chevron] {
+        width: 0.75rem;
+        height: 0.75rem;
+        color: var(--fork-ink-50);
+      }
+    }
+
+    & [data-composer-chip="xs"] {
+      border-radius: 0.375rem;
+      font-size: 12px;
+      color: color-mix(in srgb, var(--fork-content) 85%, transparent);
+
+      &:hover {
+        background-color: color-mix(in srgb, var(--fork-content) 6%, transparent);
+      }
+
+      &:is([data-popup-open], [data-pressed], [aria-pressed="true"]) {
+        background-color: color-mix(in srgb, var(--fork-content) 8%, transparent);
+      }
+    }
+
+    & [data-composer-send] {
+      width: 1.625rem;
+      height: 1.625rem;
+      border-radius: 0.375rem;
+
+      & > svg path[stroke] {
+        stroke-width: 1.3125;
+      }
+    }
+  }
+}

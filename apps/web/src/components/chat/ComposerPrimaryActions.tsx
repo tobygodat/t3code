@@ -140,6 +140,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               if (canOperateThread) onInterrupt();
             }}
             aria-label="Stop generation"
+            data-composer-send=""
           />
         }
       >
@@ -318,6 +319,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         (!hasSendableContent && !showResume)
       }
       aria-label={submitStatus ?? submitLabel}
+      data-composer-send=""
     >
       {stageBackdropVariant ? (
         <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
