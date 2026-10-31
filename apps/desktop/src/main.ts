@@ -1,3 +1,4 @@
+import "./app/DesktopBundleEnvironment.ts";
 import * as MacPermissions from "./permissions/MacPermissions.ts";
 for (const stream of [process.stdout, process.stderr]) {
   stream.on("error", (err: NodeJS.ErrnoException) => {
@@ -46,6 +47,7 @@ import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfigurat
 import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuth from "./backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopNetworkInterfaces from "./backend/DesktopNetworkInterfaces.ts";
+import * as DesktopConfig from "./app/DesktopConfig.ts";
 import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
 import * as DesktopLinuxUrlHandler from "./app/DesktopLinuxUrlHandler.ts";
@@ -84,6 +86,21 @@ if (process.argv.includes("--version")) {
     if (!(error instanceof Error) || !("code" in error) || error.code !== "EPIPE") throw error;
   }
   Electron.app.exit(0);
+}
+
+// Electron names the macOS safeStorage keychain item after the app name it has once this script
+// has loaded, before the async startup renames the app. A relabelled build needs its own item.
+const rawStageLabel = process.env.T3CODE_DESKTOP_STAGE_LABEL ?? "";
+const stageLabelOverride = DesktopConfig.parseStageLabelOverride(rawStageLabel);
+if (Option.isSome(stageLabelOverride)) {
+  Electron.app.setName(DesktopEnvironment.resolveElectronAppName(stageLabelOverride.value));
+  // Clerk registers the app as the default t3code:// handler at startup, which would take those
+  // links from the official app. A relabelled build leaves URL handling to the official app.
+  Electron.app.setAsDefaultProtocolClient = () => false;
+} else if (rawStageLabel.trim().length > 0) {
+  process.stderr.write(
+    `Ignoring unknown T3CODE_DESKTOP_STAGE_LABEL ${JSON.stringify(rawStageLabel)}.\n`,
+  );
 }
 
 const layerDesktopEnvironment = Layer.unwrap(

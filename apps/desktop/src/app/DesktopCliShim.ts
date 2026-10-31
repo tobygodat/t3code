@@ -112,6 +112,15 @@ export const renderCliShim = (input: {
   ].join("\n");
 };
 
+/** Another install, such as a second app with its own T3 home, writes the same marker. */
+export const launchesThisApp = (
+  content: string,
+  environment: DesktopEnvironment.DesktopEnvironment["Service"],
+) =>
+  content.includes(
+    `app=${shellWord(Option.getOrElse(environment.appImagePath, () => process.execPath))}\n`,
+  );
+
 export const launcherPath = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
   environment.path.join(
     environment.baseDir,

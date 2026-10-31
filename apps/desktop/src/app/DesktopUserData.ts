@@ -1,5 +1,7 @@
+import type { DesktopAppStageLabel } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -36,9 +38,17 @@ export const resolveUserDataPath = Effect.fn("desktop.userData.resolveUserDataPa
     readonly appDataDirectory: string;
     readonly isDevelopment: boolean;
     readonly platform: NodeJS.Platform;
+    readonly stageLabelOverride?: Option.Option<DesktopAppStageLabel>;
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    // A relabelled build runs beside the official app, so it needs its own single-instance lock.
+    if (input.stageLabelOverride !== undefined && Option.isSome(input.stageLabelOverride)) {
+      return path.join(
+        input.appDataDirectory,
+        `t3code-${input.stageLabelOverride.value.toLowerCase()}`,
+      );
+    }
     const names = input.isDevelopment
       ? { current: "t3code-dev", legacy: "T3 Code (Dev)" }
       : { current: "t3code-v2", legacy: "T3 Code (Alpha)" };

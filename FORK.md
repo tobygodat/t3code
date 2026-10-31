@@ -28,6 +28,45 @@ This is Toby's fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code), 
 
 - Any other non-zero exit: git itself failed, such as a fetch error or a push rejected because `origin/main` moved mid-run. Run it again.
 
+## The fork as a desktop app
+
+The fork installs as **T3 Code Fork** (`~/Applications/T3 Code Fork.app`, bundle ID `com.tobygodat.t3code.fork`) and runs beside the official app. It keeps its T3 home in `~/.t3-fork` and its Electron profile in `~/Library/Application Support/t3code-fork`, so it shares no threads, settings or keychain item with the official install.
+
+`scripts/fork/release-desktop.sh` builds and installs it. It needs Rust, which the desktop build compiles its resource monitor with: `brew install rustup`, then `rustup default stable`.
+
+- By default it builds `origin/main`. It skips the build when the installed app, or a build staged to replace it, already carries that commit (`T3ForkCommit` in its `Info.plist`), so a deleted or replaced app gets rebuilt. `--ref <commit-ish>` builds another commit, and `--force` rebuilds.
+- It refuses a commit that does not contain the commit completing the isolation code (`isolation_commit` in the script), and checks the built `app.asar` for `T3CODE_DESKTOP_STAGE_LABEL` and `desktop-env.json`. Merge the PR that adds the desktop app into `main` with a merge commit, not a squash or rebase, so that commit stays in `main`'s history. If it was squashed or rebased anyway, every build is refused until you set `isolation_commit` to the commit on `main` that holds the isolation code.
+- It builds in a detached `t3code-release` worktree next to the main checkout, or at `T3_FORK_RELEASE_WORKTREE`, which must be an absolute path. It marks a worktree it creates with a `t3-fork-release` file in that worktree's git dir, and refuses any existing worktree without the marker or with a branch checked out, so it never resets someone else's work. Before it resets the worktree, it lists every process's working directory with `lsof`. It exits 74 and names each process still working there, such as a terminal tab left open in it. If `lsof` fails or takes over a minute, it refuses rather than guess.
+- It patches the bundle: its own bundle ID, no URL schemes or document types, and `Contents/Resources/desktop-env.json`, which sets the T3 home, turns off updates and sets `T3CODE_DESKTOP_STAGE_LABEL=Fork`. The packaged app reads that file at startup however it is launched, even when its executable is run directly. All three values are required and replace inherited ones, and it ignores any other name. `T3CODE_HOME` must be an absolute path and the stage label a known one. If the file cannot be read or parsed, or a value is missing or invalid, the app shows an error and quits rather than start with the official app's home and keychain item. An app without the file, such as an upstream build, starts as before. The build itself uses the product name T3 Code Fork, so the bundle, its helpers and the menu bar carry that name.
+- While T3 Code Fork runs, the new build waits in `~/.t3-fork/releases` and the script exits 75. Quit the app and run `scripts/fork/release-desktop.sh --install-staged`, or let the next run install it. The bundle it replaced stays in `~/.t3-fork/releases/previous`. While a copy runs from there, the script fails before building, because that copy blocks the swap.
+- One run at a time: the script opens `~/.t3-fork/releases/.release.lock` on a file descriptor and locks it with `lockf`. Every process it starts keeps the lock, so a run whose shell was killed holds it until its last process ends, and the kernel releases it then. The build runs without the descriptor, so a daemon it leaves behind cannot hold the lock. Neither can build processes that outlive a stopped run; the working-directory check makes the next run exit 74 until they end.
+- Exit 0 means installed or already up to date, 64 bad arguments or a bad path setting, 73 another run holds the lock, 74 a process still works in the release worktree, and 75 staged. Any other code is a failure, including 129, 130 and 143 for SIGHUP, SIGINT and SIGTERM. Every exit except 0, 73 and 75 posts a notification; `~/.t3-fork/releases/build.log` has the build output. If the run unlocked the signing keychain, it locks it again on the way out.
+
+Run it on a schedule, such as a T3 Code scheduled task after the morning upstream sync. The scheduled form runs `origin/main`'s copy of the script, so a fix to the script reaches the schedule once it merges. `T3_FORK_REPO` tells it which checkout to run git in:
+
+```sh
+git -C /Users/tobygodat/t3code fetch origin main
+T3_FORK_REPO=/Users/tobygodat/t3code sh <(git -C /Users/tobygodat/t3code show origin/main:scripts/fork/release-desktop.sh)
+```
+
+`T3_FORK_REPO` must be an absolute path to any checkout of the fork, and defaults to the checkout holding the script. The `<(…)` form needs bash or zsh; from plain `sh`, write the script to a temp file first. Each run fetches `origin/main` and posts a macOS notification when it installs or stages a build, or fails.
+
+### Signing
+
+By default each build gets a new ad-hoc signature, so macOS treats every rebuild as a new app: it asks again for the "T3 Code Fork Safe Storage" keychain item and for privacy permissions. To stop that, run `scripts/fork/create-signing-identity.sh` once. It makes a self-signed code-signing identity in its own keychain under `~/.t3-fork/signing`, and later builds sign with it, so their designated requirement stays the same. It needs no admin rights and leaves the login keychain and the keychain search list alone. The first build signed this way asks for the keychain item one last time; choose Always Allow.
+
+The keychain's random password sits beside it in `keychain-password`, readable only by you (mode 0600). The release script unlocks the keychain to sign and locks it again straight after, or on exit if the run fails or is stopped mid-sign. Only a SIGKILL mid-sign leaves it unlocked until you log out. Delete `~/.t3-fork/signing` to go back to ad-hoc signatures.
+
+What to expect:
+
+- Without the signing identity, macOS may ask for permissions again after each rebuild.
+- `t3code://` links and sign-in callbacks open the official app, so cloud sign-in does not work in the fork app. The fork never registers itself as a link handler: its bundle declares no URL types, and it turns off the runtime registration Clerk does at startup.
+- SSH remote environments may fail. The remote side downloads the T3 server archive for the app's version, and the fork's preview versions have no published archive.
+- It never updates itself. New builds come only from this script.
+- Settings > About shows the official app's `t3` command as another app's and leaves it alone. The fork's own launcher is `~/.t3-fork/bin/t3`.
+- Never run `t3 service install` from the fork. The background service shares the official app's launchd label, `com.t3tools.t3code.service`, so it would replace the official service.
+- `open` passes your shell's environment to the app. From a shell inside T3 Code that includes `ELECTRON_RUN_AS_NODE`, so the app runs as plain Node and quits at once. Launch it from the Dock or Finder, or with `env -i HOME="$HOME" open -a "T3 Code Fork"`.
+
 ## Keeping conflicts rare
 
 Every line the fork changes in an upstream file can conflict later. So:

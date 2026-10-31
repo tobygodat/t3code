@@ -147,6 +147,38 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("leaves the t3 command of another app with its own T3 home alone", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const theirLauncher = path.join(home, ".t3-other", "bin", "t3");
+      yield* fs.makeDirectory(path.dirname(theirLauncher), { recursive: true });
+      yield* fs.writeFileString(
+        theirLauncher,
+        DesktopCliShim.renderCliShim({
+          target: {
+            kind: "direct",
+            executable: "/Applications/T3 Code (Nightly).app/Contents/MacOS/T3 Code (Nightly)",
+            entry: "/Applications/T3 Code (Nightly).app/Contents/Resources/app.asar/bin.mjs",
+          },
+          shimPath: theirLauncher,
+          t3Home: path.join(home, ".t3-other"),
+        }),
+        { mode: 0o755 },
+      );
+      const theirs = path.join(home, ".local", "bin", "t3");
+      yield* fs.makeDirectory(path.dirname(theirs), { recursive: true });
+      yield* fs.symlink(theirLauncher, theirs);
+
+      const command = yield* commandIn({ home });
+      expect((yield* command.state).installedPath).toBeNull();
+      expect((yield* command.install).installedPath).toBe(path.join(home, "bin", "t3"));
+      expect((yield* command.uninstall).installedPath).toBeNull();
+      expect(yield* fs.readLink(theirs)).toBe(theirLauncher);
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("finds and removes a link left by a previous T3 home", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
