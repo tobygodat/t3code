@@ -224,11 +224,13 @@ commit=$(git -C "$script_dir" rev-parse --verify --quiet "$ref^{commit}") || ref
 short=$(git -C "$script_dir" rev-parse --short "$commit")
 
 # The commit that completes the fork's isolation code; without it, the build would share the
-# official app's T3 home and keychain item. Update it if its branch is rebased or squashed
-# before it reaches main.
+# official app's T3 home and keychain item. Its PR must be merged into main with a merge commit,
+# not squashed or rebased, so this commit stays in main's history.
 isolation_commit=3952dc1910ffd5f7ee0d233f69fcf45742aade79
 git -C "$script_dir" merge-base --is-ancestor "$isolation_commit" "$commit" ||
-  refuse "$ref ($short) does not contain the fork's isolation code ($isolation_commit)."
+  refuse "$ref ($short) does not contain the fork's isolation code ($isolation_commit). If main has \
+that code under another commit because its PR was squashed or rebased, set isolation_commit in \
+scripts/fork/release-desktop.sh to that commit."
 
 if [ "$force" -eq 0 ]; then
   pending=$(cat "$releases/pending" 2>/dev/null || true)
