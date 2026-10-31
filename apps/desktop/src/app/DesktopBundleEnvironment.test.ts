@@ -38,23 +38,28 @@ it("replaces inherited values, including empty and unknown ones", () => {
 
 it("applies only the allow-listed names", () => {
   writeBundleEnvironment(
-    JSON.stringify({ T3CODE_HOME: "/fork", ELECTRON_RUN_AS_NODE: "1", T3CODE_PORT: "1" }),
+    JSON.stringify({ ...JSON.parse(forkEnvironment), ELECTRON_RUN_AS_NODE: "1", T3CODE_PORT: "1" }),
   );
   const env: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
   applyBundleEnvironment({ isPackaged: true, resourcesPath, env });
-  expect(env).toEqual({ PATH: "/usr/bin", T3CODE_HOME: "/fork" });
+  expect(env).toEqual({ PATH: "/usr/bin", ...JSON.parse(forkEnvironment) });
 });
 
-it("ignores values that are not strings", () => {
-  writeBundleEnvironment(
-    JSON.stringify({
-      T3CODE_HOME: 1,
-      T3CODE_DISABLE_AUTO_UPDATE: true,
-      T3CODE_DESKTOP_STAGE_LABEL: null,
-    }),
-  );
+it.each([
+  ["a missing T3CODE_HOME", { T3CODE_HOME: undefined }],
+  ["an empty T3CODE_HOME", { T3CODE_HOME: "" }],
+  ["a relative T3CODE_HOME", { T3CODE_HOME: ".t3-fork" }],
+  ["a numeric T3CODE_HOME", { T3CODE_HOME: 1 }],
+  ["a missing T3CODE_DISABLE_AUTO_UPDATE", { T3CODE_DISABLE_AUTO_UPDATE: undefined }],
+  ["an empty T3CODE_DISABLE_AUTO_UPDATE", { T3CODE_DISABLE_AUTO_UPDATE: "" }],
+  ["a boolean T3CODE_DISABLE_AUTO_UPDATE", { T3CODE_DISABLE_AUTO_UPDATE: true }],
+  ["a missing T3CODE_DESKTOP_STAGE_LABEL", { T3CODE_DESKTOP_STAGE_LABEL: undefined }],
+  ["a null T3CODE_DESKTOP_STAGE_LABEL", { T3CODE_DESKTOP_STAGE_LABEL: null }],
+  ["an unknown T3CODE_DESKTOP_STAGE_LABEL", { T3CODE_DESKTOP_STAGE_LABEL: "Spoon" }],
+])("throws and changes nothing on %s", (_, override) => {
+  writeBundleEnvironment(JSON.stringify({ ...JSON.parse(forkEnvironment), ...override }));
   const env: NodeJS.ProcessEnv = { T3CODE_HOME: "/inherited" };
-  applyBundleEnvironment({ isPackaged: true, resourcesPath, env });
+  expect(() => applyBundleEnvironment({ isPackaged: true, resourcesPath, env })).toThrow();
   expect(env).toEqual({ T3CODE_HOME: "/inherited" });
 });
 
