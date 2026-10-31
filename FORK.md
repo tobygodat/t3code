@@ -60,7 +60,7 @@ The keychain's random password sits beside it in `keychain-password`, readable o
 What to expect:
 
 - Without the signing identity, macOS may ask for permissions again after each rebuild.
-- `t3code://` links and sign-in callbacks open the official app, so cloud sign-in does not work in the fork app.
+- `t3code://` links and sign-in callbacks open the official app, so cloud sign-in does not work in the fork app. The fork never registers itself as a link handler: its bundle declares no URL types, and it turns off the runtime registration Clerk does at startup.
 - SSH remote environments may fail. The remote side downloads the T3 server archive for the app's version, and the fork's preview versions have no published archive.
 - It never updates itself. New builds come only from this script.
 - Settings > About shows the official app's `t3` command as another app's and leaves it alone. The fork's own launcher is `~/.t3-fork/bin/t3`.

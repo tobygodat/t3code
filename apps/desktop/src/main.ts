@@ -94,6 +94,9 @@ const rawStageLabel = process.env.T3CODE_DESKTOP_STAGE_LABEL ?? "";
 const stageLabelOverride = DesktopConfig.parseStageLabelOverride(rawStageLabel);
 if (Option.isSome(stageLabelOverride)) {
   Electron.app.setName(DesktopEnvironment.resolveElectronAppName(stageLabelOverride.value));
+  // Clerk registers the app as the default t3code:// handler at startup, which would take those
+  // links from the official app. A relabelled build leaves URL handling to the official app.
+  Electron.app.setAsDefaultProtocolClient = () => false;
 } else if (rawStageLabel.trim().length > 0) {
   process.stderr.write(
     `Ignoring unknown T3CODE_DESKTOP_STAGE_LABEL ${JSON.stringify(rawStageLabel)}.\n`,
