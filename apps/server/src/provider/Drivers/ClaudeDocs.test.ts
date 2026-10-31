@@ -70,11 +70,18 @@ const readOther = [
   toolResult("r9", '{"verdict":"allow","value":{"name":"Other"},"files":[]}'),
 ];
 
-const update = (id: string, doc: string) =>
+const update = (id: string, doc: string, ops: ReadonlyArray<string> = ["insert"]) =>
   toolUse(id, "mcp__claude_ai_Claude_Docs__update", {
     ref: { object: "node", id: "n1" },
     container: { kind: "project", id: doc },
+    payload: { ops: ops.map((op) => ({ op })) },
   });
+
+/** An error carries a url too, so a success row must match exactly. */
+const expectOutcome = (result: unknown, expected: object) =>
+  "reason" in expected
+    ? expect(result).toMatchObject(expected)
+    : expect(result).toStrictEqual(expected);
 
 it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
   describe("claudeDocsArgs", () => {
@@ -268,14 +275,12 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
   });
 
   describe("interpretEdit", () => {
-    const denyUpdate = (line: string) =>
-      isResultFor(EDIT_UPDATE_ID)(line)
-        ? toolResult(
-            EDIT_UPDATE_ID,
-            '{"verdict":"deny","reason":"guard_mismatch","hint":"that block changed"}\nsupport: req_test',
-            true,
-          )
-        : line;
+    const denyUpdate =
+      (deny = '{"verdict":"deny","reason":"guard_mismatch","hint":"that block changed"}') =>
+      (line: string) =>
+        isResultFor(EDIT_UPDATE_ID)(line)
+          ? toolResult(EDIT_UPDATE_ID, `${deny}\nsupport: req_test`, true)
+          : line;
     const cases: ReadonlyArray<
       readonly [
         name: string,
@@ -311,7 +316,21 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         "a guard mismatch retried until it landed",
         DOC,
         (edit) => [
-          ...edit.map(denyUpdate),
+          ...edit.map(denyUpdate()),
+          update("t9", DOC),
+          toolResult("t9", '{"verdict":"allow","rev":5}'),
+        ],
+        { url: DOC_URL },
+      ],
+      [
+        "a malformed update resent until it landed",
+        DOC,
+        (edit) => [
+          ...edit.map(
+            denyUpdate(
+              '{"verdict":"deny","reason":"bad_request","hint":"ops[0].target.ids[0] is relative_id"}',
+            ),
+          ),
           update("t9", DOC),
           toolResult("t9", '{"verdict":"allow","rev":5}'),
         ],
@@ -322,7 +341,7 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         DOC,
         (edit) => [
           ...edit,
-          update("t9", DOC),
+          update("t9", DOC, ["delete"]),
           toolResult("t9", '{"verdict":"deny","reason":"bad_request","detail":"op:unknown"}', true),
           update("t10", DOC),
           toolResult("t10", '{"verdict":"allow","rev":6}'),
@@ -392,7 +411,7 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       [
         "a read of another doc with no edit",
         DOC,
-        (edit) => [...edit.map(denyUpdate), ...readOther],
+        (edit) => [...edit.map(denyUpdate()), ...readOther],
         { reason: "refused", message: expect.stringContaining(OTHER_DOC) },
       ],
       [
@@ -409,7 +428,7 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       [
         "a denied update",
         DOC,
-        (edit) => edit.map(denyUpdate),
+        (edit) => edit.map(denyUpdate()),
         {
           reason: "refused",
           message: "claude.ai refused the call (guard_mismatch): that block changed",
@@ -419,7 +438,8 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
     it.effect.each(cases)("reports %s", ([, id, lines, expected]) =>
       fixture("edit").pipe(
         Effect.map((edit) => {
-          expect(interpretEdit(id, collectConnectorCalls(lines(edit), PLANS.edit))).toMatchObject(
+          expectOutcome(
+            interpretEdit(id, collectConnectorCalls(lines(edit), PLANS.edit)),
             expected,
           );
         }),
@@ -539,9 +559,10 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       ],
       ["no batch call", [prose("I could not find the tool.")], { reason: "connector_missing" }],
     ])("%s", (_name, lines, expected) => {
-      expect(
+      expectOutcome(
         interpretCreate(sent, collectConnectorCalls([LOCKED, ...lines], PLANS.create)),
-      ).toMatchObject(expected);
+        expected,
+      );
     });
   });
 });
