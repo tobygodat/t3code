@@ -22,7 +22,8 @@
 # Exit codes:
 #   0   installed, or already up to date
 #   64  bad arguments
-#   73  another release run holds the lock; nothing was done
+#   73  another release run holds the lock, or a process still works in the
+#       release worktree; nothing was done
 #   75  built and staged, but the fork app is running; quit it and run again,
 #       or wait for the next scheduled run
 #   1   anything else failed; see build.log. Every exit other than 0, 73 and 75
@@ -42,7 +43,9 @@ plist_buddy=/usr/libexec/PlistBuddy
 exit_usage=64
 exit_busy=73
 exit_staged=75
-lock_grace_seconds=60
+# lockf exits 75 when the lock is busy, so the locked run reports staged as 76 and the wrapper maps it back.
+exit_lock_busy=75
+exit_staged_locked=76
 
 notify() {
   osascript -e "display notification \"$1\" with title \"$app_name\"" >/dev/null 2>&1 || true
@@ -53,18 +56,29 @@ die() {
   exit 1
 }
 
-lock="$releases/.lock"
-lock_held=0
 on_exit() {
   status=$?
-  [ "$lock_held" -eq 0 ] || rm -rf "$lock"
   case $status in
-    0 | "$exit_busy" | "$exit_staged") ;;
+    0 | "$exit_busy" | "$exit_staged_locked") ;;
     *) notify "Release failed (exit $status). See $releases/build.log." ;;
   esac
 }
-trap on_exit EXIT
-trap 'exit 130' INT TERM HUP
+
+# The kernel drops the lock when its holder exits or dies, so a killed run never blocks the next.
+if [ "${T3_FORK_RELEASE_LOCKED:-}" != 1 ]; then
+  mkdir -p "$releases"
+  status=0
+  T3_FORK_RELEASE_LOCKED=1 /usr/bin/lockf -s -k -t 0 "$releases/.release.lock" /bin/sh "$0" "$@" ||
+    status=$?
+  case $status in
+    "$exit_lock_busy")
+      echo "Another release run is in progress." >&2
+      exit "$exit_busy"
+      ;;
+    "$exit_staged_locked") exit "$exit_staged" ;;
+    *) exit "$status" ;;
+  esac
+fi
 
 usage() {
   echo "Usage: $0 [--ref <commit-ish>] [--force] | --install-staged" >&2
@@ -87,6 +101,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+trap on_exit EXIT
+trap 'exit 130' INT TERM HUP
+
 running_from() {
   ps -axo comm= | grep -qF "$1/"
 }
@@ -97,37 +114,6 @@ fork_app_running() {
 
 bundle_commit() {
   "$plist_buddy" -c "Print :T3ForkCommit" "$1/Contents/Info.plist" 2>/dev/null || true
-}
-
-# The lock is a directory holding the owner's PID, moved in whole so it is never empty for long.
-acquire_lock() {
-  mkdir -p "$releases"
-  pid_file="$releases/.lock-pid.$$"
-  echo $$ >"$pid_file"
-  attempt=0
-  while ! mkdir "$lock" 2>/dev/null; do
-    holder=$(cat "$lock/pid" 2>/dev/null || true)
-    if [ -z "$holder" ]; then
-      age=$(($(date +%s) - $(stat -f %m "$lock" 2>/dev/null || date +%s)))
-      [ "$age" -ge "$lock_grace_seconds" ] || lock_busy "a run that is starting"
-    elif ps -p "$holder" -o command= 2>/dev/null | grep -qF release-desktop.sh; then
-      lock_busy "$holder"
-    fi
-    attempt=$((attempt + 1))
-    [ "$attempt" -le 1 ] || lock_busy "unknown"
-    # Recheck the holder right before taking the lock over, so a new owner is never evicted.
-    [ "$(cat "$lock/pid" 2>/dev/null || true)" = "$holder" ] || continue
-    echo "Removing a stale release lock (holder ${holder:-none})." >&2
-    rm -rf "$lock"
-  done
-  lock_held=1
-  mv "$pid_file" "$lock/pid"
-}
-
-lock_busy() {
-  rm -f "$pid_file"
-  echo "Another release run ($1) is in progress." >&2
-  exit "$exit_busy"
 }
 
 # A swap that stopped between its two renames leaves the old bundle in swap_old.
@@ -169,7 +155,7 @@ install_pending() {
   if fork_app_running; then
     notify "$version is ready. Quit $app_name to install it."
     echo "Staged $app_name $version; it installs once every copy of $app_name quits."
-    exit "$exit_staged"
+    exit "$exit_staged_locked"
   fi
   [ ! -e "$swap_old" ] || die "$swap_old is still in use; leaving $version staged."
   mkdir -p "$(dirname "$install_path")"
@@ -195,7 +181,6 @@ prune_releases() {
   done
 }
 
-acquire_lock
 recover_swap
 
 if [ "$install_only" -eq 1 ]; then
