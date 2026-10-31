@@ -22,8 +22,9 @@
 # Exit codes:
 #   0   installed, or already up to date
 #   64  bad arguments
-#   73  another release run holds the lock, or a process still works in the
-#       release worktree; nothing was done
+#   73  another release run holds the lock; nothing was done
+#   74  processes still have their working directory in the release worktree;
+#       the notification names them
 #   75  built and staged, but the fork app is running; quit it and run again,
 #       or wait for the next scheduled run
 #   1   anything else failed; see build.log
@@ -41,8 +42,11 @@ signing_dir="$fork_home/signing"
 signing_identity="T3 Code Fork Local Signing"
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 plist_buddy=/usr/libexec/PlistBuddy
+lsof=/usr/sbin/lsof
+lsof_timeout=60
 exit_usage=64
 exit_busy=73
+exit_in_use=74
 exit_staged=75
 exit_lockf_busy=75
 
@@ -278,13 +282,20 @@ fi
 
 if [ -d "$worktree" ]; then
   # A build left running by a killed run still works here; resetting under it would break both.
-  users=$(lsof -a -d cwd -Fpn 2>/dev/null | awk -v dir="$worktree" '
-    /^p/ { pid = substr($0, 2) }
-    /^n/ { path = substr($0, 2); if (path == dir || index(path, dir "/") == 1) print pid }')
-  if [ -n "$users" ]; then
-    echo "Processes $(echo $users) still work in $worktree. Let them finish, or stop them." >&2
-    exit "$exit_busy"
+  # lsof lists every process's working directory, this shell's included, so a scan without this
+  # shell's record failed. The alarm bounds a hung scan, which counts as a failure too.
+  lsof_status=0
+  cwds=$(/usr/bin/perl -e 'alarm shift; exec @ARGV' "$lsof_timeout" \
+    "$lsof" -b -w -a -d cwd -Fpcn 2>/dev/null) || lsof_status=$?
+  if [ "$lsof_status" -gt 1 ] || ! printf '%s\n' "$cwds" | grep -qx "p$$"; then
+    die "Could not list the processes working in $worktree ($lsof exit $lsof_status). Refusing to reset it."
   fi
+  holders=$(printf '%s\n' "$cwds" | awk -v dir="$worktree" '
+    /^p/ { pid = substr($0, 2) }
+    /^c/ { cmd = substr($0, 2) }
+    /^n/ { path = substr($0, 2); if (path == dir || index(path, dir "/") == 1) { printf "%s%s (%s)", sep, cmd, pid; sep = ", " } }')
+  [ -z "$holders" ] ||
+    fail "$exit_in_use" "Still working in $worktree: $holders. Let them finish or stop them, then run again."
   git -C "$worktree" reset --quiet --hard
   git -C "$worktree" checkout --quiet --detach "$commit"
 else
