@@ -1082,9 +1082,12 @@ it.effect("lists pull request watch tools only to threads that are not delegated
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
-it.effect(
-  "offers the claude.ai Docs tools only to non-Claude threads while the setting is on",
-  () =>
+it.effect.each([
+  { mode: "desktop", offered: ["claude_artifact_read", "claude_artifact_write"] },
+  { mode: "web", offered: [] },
+] as const)(
+  "offers the claude.ai Docs tools on $mode only to non-Claude threads while the setting is on",
+  ({ mode, offered }) =>
     Effect.scoped(
       Effect.gen(function* () {
         const threadScope = (
@@ -1128,7 +1131,7 @@ it.effect(
           Layer.provide(
             Layer.mergeAll(
               Layer.succeedContext(settingsContext),
-              Layer.succeed(ServerConfig.ServerConfig, { ...config, mode: "desktop" }),
+              Layer.succeed(ServerConfig.ServerConfig, { ...config, mode }),
               Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
                 getInstance: (instanceId) =>
                   Effect.succeed({
@@ -1208,17 +1211,20 @@ it.effect(
             name: "claude_artifact_read",
             arguments: { artifact: "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv" },
           });
-        const artifactTools = ["claude_artifact_read", "claude_artifact_write"];
+        const hidden = {
+          error: { code: -32602, message: "Tool 'claude_artifact_read' not found" },
+        };
 
         expect(yield* listed("codexToken")).toEqual([]);
-        expect(yield* read("codexToken")).toMatchObject({ error: expect.anything() });
+        expect(yield* read("codexToken")).toMatchObject(hidden);
 
         yield* settings.updateSettings({ claudeArtifactsEnabled: true });
-        expect(yield* listed("codexToken")).toEqual(artifactTools);
+        expect(yield* listed("codexToken")).toEqual(offered);
         expect(yield* listed("claudeToken")).toEqual([]);
         expect(yield* listed("clientToken")).toEqual([]);
-        expect(yield* read("claudeToken")).toMatchObject({ error: expect.anything() });
-        expect(yield* read("clientToken")).toMatchObject({ error: expect.anything() });
+        if (offered.length === 0) expect(yield* read("codexToken")).toMatchObject(hidden);
+        expect(yield* read("claudeToken")).toMatchObject(hidden);
+        expect(yield* read("clientToken")).toMatchObject(hidden);
       }),
     ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
