@@ -1,5 +1,10 @@
 // Context tags are runtime singletons; drivers need multiple instances.
 import type {
+  ClaudeArtifactId,
+  ClaudeArtifactReadResult,
+  ClaudeArtifactsError,
+  ClaudeArtifactWrite,
+  ClaudeArtifactWriteResult,
   ProviderConsumeResetCreditOutcome,
   AcpRegistryListSessionsResult,
   AcpRegistryListProvidersResult,
@@ -49,6 +54,15 @@ export interface ProviderInstance {
     ProviderConsumeResetCreditOutcome,
     ProviderDriverError
   >;
+  /** Claude only: claude.ai Docs through this instance's own CLI login. */
+  readonly claudeDocs?: {
+    readonly read: (
+      id: ClaudeArtifactId,
+    ) => Effect.Effect<ClaudeArtifactReadResult, ClaudeArtifactsError>;
+    readonly write: (
+      request: ClaudeArtifactWrite,
+    ) => Effect.Effect<ClaudeArtifactWriteResult, ClaudeArtifactsError>;
+  };
   readonly orchestrationAdapter: ProviderAdapter.ProviderAdapterV2["Service"];
   readonly textGeneration: ProviderTextGeneration;
   readonly auth?: ProviderAuthController;
