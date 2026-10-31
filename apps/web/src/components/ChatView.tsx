@@ -257,6 +257,7 @@ import {
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
 import { type ChatComposerHandle } from "./chat/ChatComposer";
 import { ChatComposerWithUsageLimits } from "../fork/ChatComposerWithUsageLimits";
+import { ModelWelcome } from "../fork/style/ModelWelcome";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
 import {
@@ -3407,6 +3408,7 @@ export default function ChatView(props: ChatViewProps) {
               )}
             </div>
 
+            <ModelWelcome />
             <div
               {...composerArea}
               ref={(overlay: HTMLDivElement | null) => {

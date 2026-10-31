@@ -25,6 +25,7 @@ import {
   deriveLockedProvider,
   makeModelDisabledReason,
 } from "../ChatView.logic";
+import { announceModelPick } from "../../fork/style/ModelWelcome";
 interface ComposerSelectionInput {
   readonly environmentId: EnvironmentId;
   readonly composerDraftTarget: ComposerThreadTarget;
@@ -211,6 +212,7 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       { explicit: true, replaceOptions: true },
     );
     setStickyComposerModelSelection(nextModelSelection);
+    announceModelPick(resolvedModel);
     if (options?.focusComposer !== false) scheduleComposerFocus();
   };
   const onProviderModelSelectStable = useStableCallback(onProviderModelSelect);

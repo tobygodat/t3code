@@ -2,7 +2,8 @@
    Each piece is gated by its token in data-fork-style on <html> (fork/style/features.ts) and
    applies to the default dark theme only, like fork/theme.css. Unlayered rules here beat
    Tailwind's layered utilities without !important. */
-[data-fork-effort-tiles] {
+[data-fork-effort-tiles],
+[data-fork-mascot] {
   display: none;
 }
 
@@ -251,6 +252,101 @@
     }
   }
 
+  @media (prefers-reduced-motion: no-preference) {
+    /* MonoCode Shimmer on the Working label, unless T3 already shimmers it. */
+    &[data-fork-style~="working-shimmer"]
+      [data-fork-working-label]:not(:has(.live-activity-focus)) {
+      --fork-shimmer-spread: 30px;
+      background-image:
+        linear-gradient(
+          90deg,
+          transparent calc(50% - var(--fork-shimmer-spread)),
+          var(--fork-content) 50%,
+          transparent calc(50% + var(--fork-shimmer-spread))
+        ),
+        linear-gradient(
+          color-mix(in srgb, var(--fork-content) 40%, transparent),
+          color-mix(in srgb, var(--fork-content) 40%, transparent)
+        );
+      background-size:
+        250% 100%,
+        auto;
+      background-repeat: no-repeat, padding-box;
+      background-clip: text;
+      color: transparent;
+      animation: fork-shimmer-text 1s linear infinite;
+      animation-play-state: var(--visible-animation-state, paused);
+    }
+
+    /* MonoCode zen-thinking-pulse in place of T3's shimmer on the live Thinking row. */
+    &[data-fork-style~="thinking-pulse"]
+      [data-timeline-row-kind="thinking"]
+      :has(> .live-activity-focus) {
+      animation: fork-thinking-pulse 1.8s ease-in-out infinite;
+      animation-play-state: var(--visible-animation-state, paused);
+
+      & > .live-activity-focus {
+        display: none;
+      }
+    }
+  }
+
+  /* MonoCode PixelMascot: idle bobs and blinks, working hops and chews. */
+  &[data-fork-style~="mascot"] [data-fork-mascot] {
+    display: block;
+    flex-shrink: 0;
+
+    &[data-fork-mascot="working"] {
+      align-self: center;
+      width: 1rem;
+      height: 1rem;
+    }
+
+    &[data-fork-mascot="idle"] {
+      width: 1.75rem;
+      height: 1.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    & [data-pixel="frame-b"],
+    & [data-pixel="eyes-closed"] {
+      opacity: 0;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      & [data-pixel="bob"] {
+        animation: fork-pixel-bob 3.6s step-end infinite;
+      }
+
+      & [data-pixel="hop"] {
+        animation: fork-pixel-bob 1.2s step-end infinite;
+      }
+
+      & [data-pixel="frame-a"] {
+        animation: fork-pixel-frame-a 600ms step-end infinite;
+      }
+
+      & [data-pixel="frame-b"] {
+        animation: fork-pixel-frame-b 600ms step-end infinite;
+      }
+
+      & [data-pixel="eyes-open"] {
+        animation: fork-pixel-eyes-open 5.2s step-end infinite;
+        animation-delay: var(--fork-blink-delay);
+      }
+
+      & [data-pixel="eyes-closed"] {
+        animation: fork-pixel-eyes-closed 5.2s step-end infinite;
+        animation-delay: var(--fork-blink-delay);
+      }
+
+      /* After the shorthands above, which reset the play state. */
+      & [data-pixel] {
+        animation-play-state: var(--visible-animation-state, paused);
+      }
+    }
+  }
+
   /* MonoCode ModelPicker effort tiles. */
   & [data-slot="menu-radio-item"]:has(> [data-fork-effort-tiles]) {
     position: relative;
@@ -428,5 +524,75 @@
   100% {
     opacity: 0;
     box-shadow: inset 0 0 4px 0 transparent;
+  }
+}
+
+@keyframes fork-shimmer-text {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+
+@keyframes fork-thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes fork-pixel-bob {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.75px);
+  }
+}
+
+@keyframes fork-pixel-frame-a {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes fork-pixel-frame-b {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes fork-pixel-eyes-open {
+  0% {
+    opacity: 1;
+  }
+  96% {
+    opacity: 0;
+  }
+  98.5% {
+    opacity: 1;
+  }
+}
+
+@keyframes fork-pixel-eyes-closed {
+  0% {
+    opacity: 0;
+  }
+  96% {
+    opacity: 1;
+  }
+  98.5% {
+    opacity: 0;
   }
 }
