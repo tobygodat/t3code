@@ -63,6 +63,8 @@ const isResultFor = (id: string) => (line: string) =>
   line.includes('"type":"user"') && line.includes(id);
 
 const LOCKED = init(["ToolSearch", "Write"]);
+const RESULT = JSON.stringify({ type: "result", is_error: false, result: "Done." });
+const STATUS = JSON.stringify({ type: "system", subtype: "status" });
 const readOther = [
   toolUse("r9", "mcp__claude_ai_Claude_Docs__read", { ref: { object: "project", id: OTHER_DOC } }),
   toolResult("r9", '{"verdict":"allow","value":{"name":"Other"},"files":[]}'),
@@ -170,6 +172,25 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         source: (read) => read.slice(1),
         id: DOC,
         reason: "run_failed",
+      },
+      {
+        name: "a CLI whose later init cannot be read",
+        source: (read) => [...read, '{"type":"system","subtype":"init","tools":["CronList"]'],
+        id: DOC,
+        reason: "run_failed",
+      },
+      {
+        name: "a CLI that finishes before any init",
+        source: (read) => [RESULT, ...read],
+        id: DOC,
+        reason: "run_failed",
+      },
+      {
+        name: "a CLI that never lists its tools",
+        source: [STATUS],
+        id: DOC,
+        reason: "run_failed",
+        message: expect.stringContaining("without listing its tools"),
       },
       {
         name: "a CLI whose later init loads a tool dontAsk runs",
@@ -285,6 +306,28 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
           toolResult("t9", '{"verdict":"deny","reason":"guard_mismatch"}', true),
         ],
         { reason: "altered", url: DOC_URL, message: expect.stringContaining("guard_mismatch") },
+      ],
+      [
+        "a guard mismatch retried until it landed",
+        DOC,
+        (edit) => [
+          ...edit.map(denyUpdate),
+          update("t9", DOC),
+          toolResult("t9", '{"verdict":"allow","rev":5}'),
+        ],
+        { url: DOC_URL },
+      ],
+      [
+        "a refused update between two landed ones",
+        DOC,
+        (edit) => [
+          ...edit,
+          update("t9", DOC),
+          toolResult("t9", '{"verdict":"deny","reason":"bad_request","detail":"op:unknown"}', true),
+          update("t10", DOC),
+          toolResult("t10", '{"verdict":"allow","rev":6}'),
+        ],
+        { reason: "altered", url: DOC_URL, message: expect.stringContaining("bad_request") },
       ],
       [
         "an update whose result has no verdict",
@@ -424,6 +467,20 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         ],
         { reason: "altered", url: DOC_URL, message: expect.stringContaining(OTHER_URL) },
       ],
+      [
+        "a birth and an edit of an existing doc",
+        [
+          toolUse("b1", batch, sent),
+          toolResult("b1", ack),
+          toolUse("b2", batch, { container: { kind: "project", id: OTHER_DOC }, batch: [] }),
+          toolResult("b2", '{"verdict":"allow","rev":2}'),
+        ],
+        {
+          reason: "altered",
+          url: DOC_URL,
+          message: `The doc was created. Claude edited another doc (${OTHER_DOC}). Check it on claude.ai.`,
+        },
+      ],
       ["a lost result", [toolUse("b1", batch, sent)], { reason: "outcome_unknown" }],
       [
         "a birth and a lost result",
@@ -504,6 +561,15 @@ describe("makeClaudeDocs", () => {
         `trap 'touch got-term' TERM\nprintf '%s\\n' '${init(["ToolSearch", "CronList"])}'\nsleep 30 &\nwait`,
       call: "read",
       expected: { reason: "run_failed", message: expect.stringContaining("CronList") },
+    },
+    {
+      name: "fails a CLI that never lists its tools",
+      script: () => `printf '%s\\n' '${STATUS}'`,
+      call: "read",
+      expected: {
+        reason: "run_failed",
+        message: expect.stringContaining("without listing its tools"),
+      },
     },
     {
       name: "keeps a landed edit's link through a flood of stderr",
