@@ -630,7 +630,7 @@ export function interpretEdit(
         ? `Claude edited another doc (${editedElsewhere.join(", ")}). Check it on claude.ai.`
         : undefined,
       refusedPart
-        ? `claude.ai refused part of the change ${refusalDetail(refusedPart)}`
+        ? `claude.ai refused one of Claude's update calls ${refusalDetail(refusedPart).replace(/\.?$/, ".")} Read the doc to check the whole change applied.`
         : undefined,
       unresolved > 0
         ? `${unresolved === 1 ? "An edit call was" : `${unresolved} edit calls were`} sent but claude.ai's answer was lost or unreadable. Read the doc before trying again.`
