@@ -3,6 +3,7 @@ import { OtlpHeadersFromString, OtlpProtocol } from "@t3tools/shared/observabili
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 const trimNonEmptyOption = (value: string): Option.Option<string> => {
   const trimmed = value.trim();
@@ -11,6 +12,11 @@ const trimNonEmptyOption = (value: string): Option.Option<string> => {
 
 const trimmedString = (name: string) =>
   Config.String(name).pipe(Config.option, Config.map(Option.flatMap(trimNonEmptyOption)));
+
+const decodeStageLabel = Schema.decodeUnknownOption(DesktopAppStageLabelSchema);
+
+export const parseStageLabelOverride = (value: string) =>
+  trimNonEmptyOption(value).pipe(Option.flatMap(decodeStageLabel));
 
 const optionalBoolean = (name: string) =>
   Config.Boolean(name).pipe(Config.option, Config.map(Option.getOrElse(() => false)));
@@ -41,8 +47,9 @@ export const DesktopConfig = Config.all({
   t3Home: trimmedString("T3CODE_HOME"),
   devServerUrl: Config.URL("VITE_DEV_SERVER_URL").pipe(Config.option),
   appUserModelIdOverride: trimmedString("T3CODE_DESKTOP_APP_USER_MODEL_ID"),
-  stageLabel: Config.schema(DesktopAppStageLabelSchema, "T3CODE_DESKTOP_STAGE_LABEL").pipe(
+  stageLabel: Config.String("T3CODE_DESKTOP_STAGE_LABEL").pipe(
     Config.option,
+    Config.map(Option.flatMap(parseStageLabelOverride)),
   ),
   devRemoteT3ServerEntryPath: trimmedString("T3CODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH"),
   configuredBackendPort: Config.Port("T3CODE_PORT").pipe(Config.option),

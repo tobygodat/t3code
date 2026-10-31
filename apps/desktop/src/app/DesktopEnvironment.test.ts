@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
@@ -77,7 +78,7 @@ describe("DesktopEnvironment", () => {
     Effect.gen(function* () {
       const preview = { appVersion: "0.0.22-preview.20261030.1" };
       const official = yield* makeEnvironment(preview);
-      const fork = yield* makeEnvironment(preview, { T3CODE_DESKTOP_STAGE_LABEL: "Fork" });
+      const fork = yield* makeEnvironment(preview, { T3CODE_DESKTOP_STAGE_LABEL: " Fork " });
 
       assert.deepEqual(official.branding, {
         baseName: "T3 Code",
@@ -89,6 +90,13 @@ describe("DesktopEnvironment", () => {
         stageLabel: "Fork",
         displayName: "T3 Code (Fork)",
       });
+      for (const ignored of ["", "  ", "fork", "Fork Beta"]) {
+        const environment = yield* makeEnvironment(preview, {
+          T3CODE_DESKTOP_STAGE_LABEL: ignored,
+        });
+        assert.equal(environment.branding.stageLabel, "Nightly");
+        assert.isTrue(Option.isNone(environment.stageLabelOverride));
+      }
     }),
   );
 });

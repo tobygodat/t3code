@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import { resolveUserDataPath } from "./DesktopUserData.ts";
@@ -24,7 +25,6 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
         appDataDirectory: directory,
         isDevelopment: false,
         platform: "win32",
-        branding: { stageLabel: "Nightly" },
       });
       assert.equal(yield* fs.readFileString(path.join(destination, "Local State")), state);
       assert.equal(yield* fs.readFileString(path.join(source, "Local State")), state);
@@ -34,7 +34,6 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
         appDataDirectory: directory,
         isDevelopment: false,
         platform: "win32",
-        branding: { stageLabel: "Nightly" },
       });
       assert.equal(
         yield* fs.readFileString(path.join(destination, "Local State")),
@@ -43,16 +42,22 @@ it.effect.each(["t3code", "T3 Code (Alpha)"])(
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-it.effect("gives the Fork stage its own profile so it runs beside the official app", () =>
+it.effect("gives a relabelled build its own profile so it runs beside the official app", () =>
   Effect.gen(function* () {
-    const resolve = (stageLabel: "Nightly" | "Fork") =>
+    const resolve = (stageLabelOverride: Option.Option<"Fork">) =>
       resolveUserDataPath({
         appDataDirectory: "/Users/alice/Library/Application Support",
         isDevelopment: false,
         platform: "darwin",
-        branding: { stageLabel },
+        stageLabelOverride,
       });
-    assert.equal(yield* resolve("Nightly"), "/Users/alice/Library/Application Support/t3code-v2");
-    assert.equal(yield* resolve("Fork"), "/Users/alice/Library/Application Support/t3code-fork");
+    assert.equal(
+      yield* resolve(Option.none()),
+      "/Users/alice/Library/Application Support/t3code-v2",
+    );
+    assert.equal(
+      yield* resolve(Option.some("Fork")),
+      "/Users/alice/Library/Application Support/t3code-fork",
+    );
   }).pipe(Effect.provide(NodeServices.layer)),
 );

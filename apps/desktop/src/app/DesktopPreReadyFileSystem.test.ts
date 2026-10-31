@@ -13,7 +13,6 @@ const resolveWindowsUserData = (appDataDirectory: string) =>
     appDataDirectory,
     isDevelopment: false,
     platform: "win32",
-    branding: { stageLabel: "Nightly" },
   }).pipe(Effect.provide(DesktopPreReadyFileSystem.layer));
 
 it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {

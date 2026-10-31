@@ -72,6 +72,7 @@ export class DesktopEnvironment extends Context.Service<
     readonly otlpHeaders: Option.Option<Record<string, string>>;
     readonly otlpProtocol: OtlpProtocol;
     readonly branding: DesktopAppBranding;
+    readonly stageLabelOverride: Option.Option<DesktopAppStageLabel>;
     readonly displayName: string;
     readonly appUserModelId: string;
     readonly linuxDesktopEntryName: string;
@@ -111,6 +112,10 @@ export function resolveDesktopAppBranding(input: {
     displayName: `${APP_BASE_NAME} (${stageLabel})`,
   };
 }
+
+// Electron strips spaces but keeps parentheses in its User-Agent token, breaking Turnstile in preview sessions.
+export const resolveElectronAppName = (stageLabel: DesktopAppStageLabel) =>
+  `${APP_BASE_NAME} ${stageLabel}`;
 
 function normalizeDesktopArch(arch: string): DesktopRuntimeArch {
   if (arch === "arm64") return "arm64";
@@ -229,6 +234,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     otlpHeaders: config.otlpHeaders,
     otlpProtocol: config.otlpProtocol,
     branding,
+    stageLabelOverride: config.stageLabel,
     displayName,
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
       isDevelopment ? "com.t3tools.t3code.dev" : "com.t3tools.t3code",
