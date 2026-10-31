@@ -14,7 +14,11 @@ import {
   resolveBrowserLinkTargetPreference,
   resolveLinkTarget,
 } from "./browserLinkTarget";
-import { claudeArtifactOpenFor, claudeArtifactsActiveFor } from "./claudeArtifactLinks";
+import {
+  CLAUDE_PANEL_OPEN,
+  claudeArtifactsActiveFor,
+  opensAsClaudeArtifact,
+} from "./claudeArtifactLinks";
 import { BrowserSettingsReadError, openUrlInPreview } from "./openFileInPreview";
 
 const NO_MODIFIER = { metaKey: false, ctrlKey: false } as const;
@@ -44,12 +48,12 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
         : false,
     });
     if (target === "app" && targetThreadRef) {
-      const claudeOpen = claudeArtifactOpenFor(url, targetThreadRef.environmentId);
+      const claudeDoc = opensAsClaudeArtifact(url, targetThreadRef.environmentId);
       const result = await openUrlInPreview({
         threadRef: targetThreadRef,
         url,
         openPreview,
-        ...claudeOpen,
+        ...(claudeDoc ? CLAUDE_PANEL_OPEN : {}),
       });
       if (isAtomCommandInterrupted(result)) return;
       if (result._tag === "Success") {
@@ -59,17 +63,17 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       const failure = squashAtomCommandFailure(result);
       if (failure instanceof BrowserSettingsReadError) throw failure;
       // The system browser lacks the panel's claude.ai sign-in, so a forced open stops here.
-      if ("runtime" in claudeOpen) {
+      console.error(result.cause);
+      if (claudeDoc) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
             title: "Could not open the claude.ai doc",
-            description: failure instanceof Error ? failure.message : url,
+            description: "⌘/Ctrl-click the link to open it in your default browser.",
           }),
         );
         return;
       }
-      console.error(result.cause);
     }
     const api = readLocalApi();
     if (!api) throw new Error("Link opening is unavailable.");

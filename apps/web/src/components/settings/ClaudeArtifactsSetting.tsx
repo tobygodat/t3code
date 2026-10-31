@@ -18,6 +18,16 @@ import { toastManager } from "../ui/toast";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
+// Outside the component: React Compiler cannot compile try/finally.
+async function whileBusy(setBusy: (busy: boolean) => void, work: () => Promise<void>) {
+  setBusy(true);
+  try {
+    await work();
+  } finally {
+    setBusy(false);
+  }
+}
+
 export function ClaudeArtifactsSetting({ disabled }: { readonly disabled: boolean }) {
   const enabled = usePrimarySettings((settings) => settings.claudeArtifactsEnabled);
   const providers = useAtomValue(primaryServerProvidersAtom);
@@ -48,21 +58,17 @@ export function ClaudeArtifactsSetting({ disabled }: { readonly disabled: boolea
     }
   };
 
-  const signIn = async () => {
-    setBusy(true);
-    await openSignIn();
-    setBusy(false);
-  };
+  const signIn = () => whileBusy(setBusy, openSignIn);
 
   const change = async (checked: boolean) => {
     if (primaryEnvironmentId === null) return;
-    setBusy(true);
-    const result = await saveSettings({
-      environmentId: primaryEnvironmentId,
-      input: { patch: { claudeArtifactsEnabled: checked } },
+    await whileBusy(setBusy, async () => {
+      const result = await saveSettings({
+        environmentId: primaryEnvironmentId,
+        input: { patch: { claudeArtifactsEnabled: checked } },
+      });
+      if (result._tag === "Success" && checked) await openSignIn();
     });
-    if (result._tag === "Success" && checked) await openSignIn();
-    setBusy(false);
   };
 
   return (
