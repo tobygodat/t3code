@@ -31,10 +31,10 @@ const MODEL =
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")] ?? "haiku";
 const MAX_READ_CHARS = 60_000;
 const MAX_STDOUT_BYTES = 16_000_000;
-const MAX_STDERR_BYTES = 64_000;
+const MAX_STDERR_CHARS = 64_000;
 const MAX_DETAIL_CHARS = 500;
-// A tab at MAX_READ_CHARS exports as ~80k base64 chars, under 100k tokens even at one char per
-// token; the CLI's default of 25k tokens cuts that export off.
+// Exports arrive base64 in JSON, about 4/3 of the tab's bytes, and MAX_READ_CHARS applies only
+// after decoding. Above this the CLI swaps the result for a saved-file notice; see tooLarge.
 const MAX_MCP_OUTPUT_TOKENS = "100000";
 
 type DocsTool = "guide" | "read" | "export" | "batch" | "update";
@@ -53,8 +53,9 @@ export const PLANS = {
 
 /**
  * Measured on claude 2.1.314: dontAsk still runs these tools (Read inside the cwd, MCP resources,
- * crons), so they are disallowed by name. Disallowing the permission-gated tools as well, or passing
- * `--tools`, `--strict-mcp-config`, `--bare` or ENABLE_CLAUDEAI_MCP_SERVERS=false, breaks tool calls.
+ * crons, WebFetch on preapproved hosts), so they are disallowed by name, along with names the binary
+ * knows but did not load. Disallowing the permission-gated tools as well, or passing `--tools`,
+ * `--strict-mcp-config`, `--bare` or ENABLE_CLAUDEAI_MCP_SERVERS=false, breaks tool calls.
  */
 const DISALLOWED_TOOLS = [
   "Agent",
@@ -73,6 +74,8 @@ const DISALLOWED_TOOLS = [
   "NotebookRead",
   "ListMcpResourcesTool",
   "ReadMcpResourceTool",
+  "ReadMcpResourceDirTool",
+  "WebFetch",
   "CronCreate",
   "CronDelete",
   "CronList",
@@ -94,6 +97,14 @@ const DISALLOWED_TOOLS = [
   "ExitPlanMode",
   "EnterPlanMode",
   "SlashCommand",
+  "Artifact",
+  "ArtifactData",
+  "ArtifactComments",
+  "ArtifactCheck",
+  "Sleep",
+  "Brief",
+  "REPL",
+  "StructuredOutput",
 ];
 
 /** Built-in tools a run may load: each needs permission, which dontAsk denies outside the plan. */
@@ -102,7 +113,6 @@ const GATED_TOOLS: ReadonlySet<string> = new Set([
   "Edit",
   "NotebookEdit",
   "Skill",
-  "WebFetch",
   "WebSearch",
   "Write",
 ]);
@@ -128,22 +138,42 @@ export const claudeDocsArgs = (plan: Plan): ReadonlyArray<string> => [
   "--disable-slash-commands",
 ];
 
-const InitLine = Schema.Struct({
-  type: Schema.Literal("system"),
-  subtype: Schema.Literal("init"),
-  tools: Schema.optional(Schema.Array(Schema.String)),
-});
-const decodeInitLine = Schema.decodeUnknownOption(Schema.fromJsonString(InitLine));
+const LineKind = Schema.Struct({ type: Schema.String, subtype: Schema.optional(Schema.Unknown) });
+const decodeLineKind = Schema.decodeUnknownOption(Schema.fromJsonString(LineKind));
+const decodeInitTools = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ tools: Schema.Array(Schema.String) })),
+);
+
+interface Lockdown {
+  /** An init line has listed only gated tools. */
+  readonly confirmed: boolean;
+  /** Why the run cannot be trusted, phrased to follow "the Claude CLI". */
+  readonly broken: string | undefined;
+}
+
+const UNCONFIRMED: Lockdown = { confirmed: false, broken: undefined };
 
 /**
- * The built-in tools an init line loads outside GATED_TOOLS, or undefined for any other line.
- * A newer CLI may add a tool dontAsk runs; an init with no tool list fails closed the same way.
+ * Folds one stream line into the lockdown check. Every init must list only gated tools, since a
+ * newer CLI may load a tool dontAsk runs, and no conversation may start before one has.
  */
-function ungatedTools(line: string): ReadonlyArray<string> | undefined {
-  const init = Option.getOrUndefined(decodeInitLine(line));
-  if (init === undefined) return undefined;
-  if (init.tools === undefined) return ["(no tool list)"];
-  return init.tools.filter((name) => !name.startsWith("mcp__") && !GATED_TOOLS.has(name));
+function checkLockdown(lockdown: Lockdown, line: string): Lockdown {
+  if (lockdown.broken !== undefined) return lockdown;
+  const kind = Option.getOrUndefined(decodeLineKind(line));
+  if (kind?.type === "system" && kind.subtype === "init") {
+    const tools = Option.getOrUndefined(decodeInitTools(line))?.tools;
+    const ungated =
+      tools === undefined
+        ? ["(unreadable tool list)"]
+        : tools.filter((name) => !name.startsWith("mcp__") && !GATED_TOOLS.has(name));
+    return ungated.length === 0
+      ? { confirmed: true, broken: undefined }
+      : { ...lockdown, broken: `loaded tools T3 Code cannot lock down: ${ungated.join(", ")}.` };
+  }
+  if (!lockdown.confirmed && (kind?.type === "assistant" || kind?.type === "user")) {
+    return { ...lockdown, broken: "started before listing its tools." };
+  }
+  return lockdown;
 }
 
 interface DocsCall {
@@ -157,8 +187,8 @@ export interface DocsTranscript {
   readonly calls: ReadonlyArray<DocsCall>;
   /** Tools called outside the plan. */
   readonly strayTools: ReadonlyArray<string>;
-  /** Built-in tools the CLI loaded that dontAsk would not deny. */
-  readonly ungatedTools: ReadonlyArray<string>;
+  /** Why the CLI's lockdown failed, or undefined when it held. */
+  readonly lockdownBroken: string | undefined;
   /** The CLI reached its final result, so every call it made is in `calls`. */
   readonly finished: boolean;
   /** The CLI's own error result, such as an expired login or a usage limit. */
@@ -205,14 +235,11 @@ export function collectConnectorCalls(
   const calls: Array<{ tool: DocsTool; input: unknown; result: DocsCall["result"] }> = [];
   const callsById = new Map<string, (typeof calls)[number]>();
   const strayTools: Array<string> = [];
-  let ungated: ReadonlyArray<string> | undefined;
+  let lockdown = UNCONFIRMED;
   let finished = false;
   let cliError: string | undefined;
   for (const line of lines) {
-    if (ungated === undefined) {
-      ungated = ungatedTools(line);
-      if (ungated !== undefined) continue;
-    }
+    lockdown = checkLockdown(lockdown, line);
     const decoded = Option.getOrUndefined(decodeStreamLine(line));
     if (decoded === undefined) continue;
     if (decoded.type === "result") {
@@ -247,7 +274,7 @@ export function collectConnectorCalls(
       }
     }
   }
-  return { calls, strayTools, ungatedTools: ungated ?? [], finished, cliError };
+  return { calls, strayTools, lockdownBroken: lockdown.broken, finished, cliError };
 }
 
 const Frame = Schema.optional(
@@ -280,7 +307,7 @@ const ExportInput = Schema.Struct({
   format: Schema.Literal("markdown"),
 });
 const DocRefInput = Schema.Struct({
-  ref: Schema.Struct({ object: Schema.String, id: Schema.String }),
+  ref: Schema.optional(Schema.Struct({ object: Schema.String, id: Schema.String })),
   container: Schema.optional(Schema.Struct({ id: Schema.String })),
 });
 const CreateInput = Schema.Struct({
@@ -311,8 +338,16 @@ function verdictOf(text: string): unknown {
 
 const verdict = (call: DocsCall) =>
   call.result === undefined ? undefined : verdictOf(call.result.text);
-const allowed = (call: DocsCall) => decodeAs(WriteAllow)(verdict(call)) !== undefined;
 const denial = (call: DocsCall) => decodeAs(Deny)(verdict(call));
+
+/** A write the connector neither allowed nor denied, lost or unreadable, may still have landed. */
+type Ack = "allowed" | "denied" | "unknown";
+
+function ackOf(call: DocsCall): Ack {
+  const value = verdict(call);
+  if (decodeAs(WriteAllow)(value) !== undefined) return "allowed";
+  return decodeAs(Deny)(value) === undefined ? "unknown" : "denied";
+}
 
 const bounded = (text: string) =>
   text.length > MAX_DETAIL_CHARS ? `${text.slice(0, MAX_DETAIL_CHARS)}…` : text;
@@ -324,18 +359,18 @@ const fail = (
 ): ClaudeArtifactsError =>
   new ClaudeArtifactsError({ reason, message, ...(url === undefined ? {} : { url }) });
 
-function refusal(deny: typeof Deny.Type): ClaudeArtifactsError {
+function refusalDetail(deny: typeof Deny.Type): string {
   const detail = deny.hint ?? (typeof deny.detail === "string" ? deny.detail : undefined);
-  return fail(
-    "refused",
-    bounded(`claude.ai refused the call (${deny.reason})${detail ? `: ${detail}` : "."}`),
-  );
+  return bounded(`(${deny.reason})${detail ? `: ${detail}` : "."}`);
 }
+
+const refusal = (deny: typeof Deny.Type) =>
+  fail("refused", `claude.ai refused the call ${refusalDetail(deny)}`);
 
 /** Why the run left its lockdown or its plan, or undefined when it stayed inside both. */
 function offPlan(transcript: DocsTranscript): string | undefined {
-  if (transcript.ungatedTools.length > 0) {
-    return `The Claude CLI loaded tools T3 Code cannot lock down: ${transcript.ungatedTools.join(", ")}.`;
+  if (transcript.lockdownBroken !== undefined) {
+    return `The Claude CLI ${transcript.lockdownBroken}`;
   }
   if (transcript.strayTools.length > 0) {
     return `Claude called tools outside its plan: ${transcript.strayTools.join(", ")}.`;
@@ -348,6 +383,8 @@ const noDocsTools = () =>
     "connector_missing",
     "Claude did not find the claude.ai Docs connector. Check that it is turned on for this account at claude.ai.",
   );
+
+const unique = (values: ReadonlyArray<string>) => [...new Set(values)];
 
 interface ProjectRead {
   readonly call: DocsCall;
@@ -368,11 +405,20 @@ function docIdsOf(id: ClaudeArtifactId, read: ProjectRead | undefined): Readonly
   return new Set([id, frame?.slug ?? id, linked ?? id]);
 }
 
-/** The doc a read or update addresses: its container, or the ref when the ref is the doc. */
-function targetDoc(call: DocsCall): string | undefined {
+/** The doc a call addresses: its container, or the ref when the ref is the doc. */
+function targetDoc(call: DocsCall): string {
   const input = decodeAs(DocRefInput)(call.input);
-  return input?.container?.id ?? (input?.ref.object === "project" ? input.ref.id : undefined);
+  return input?.container?.id ?? (input?.ref?.object === "project" ? input.ref.id : "no doc");
 }
+
+/** Other docs a read or export reached. A refused one returned nothing; any other may have. */
+const otherDocsRead = (transcript: DocsTranscript, docIds: ReadonlySet<string>) =>
+  unique(
+    transcript.calls
+      .filter((call) => (call.tool === "read" || call.tool === "export") && !denial(call))
+      .map(targetDoc)
+      .filter((doc) => !docIds.has(doc)),
+  );
 
 function readDenial(read: ProjectRead): ClaudeArtifactsError | undefined {
   const deny = denial(read.call);
@@ -384,6 +430,10 @@ function readDenial(read: ProjectRead): ClaudeArtifactsError | undefined {
       )
     : refusal(deny);
 }
+
+/** The CLI swaps a result over MAX_MCP_OUTPUT_TOKENS for a saved-file notice the run cannot read. */
+const tooLarge = (call: DocsCall) =>
+  /exceeds maximum allowed tokens|<persisted-output>/.test(call.result?.text ?? "");
 
 export function interpretRead(
   id: ClaudeArtifactId,
@@ -401,6 +451,11 @@ export function interpretRead(
   if (denied) return denied;
   if (read.value === undefined) return fail("run_failed", "claude.ai returned an unreadable doc.");
   const docIds = docIdsOf(id, read);
+  // A doc can pull in another doc's text, so its content cannot be told apart.
+  const others = otherDocsRead(transcript, docIds);
+  if (others.length > 0) {
+    return fail("run_failed", `Claude also read other docs (${others.join(", ")}).`);
+  }
   let budget = MAX_READ_CHARS;
   const tabs: Array<ClaudeArtifactReadResult["tabs"][number]> = [];
   for (const file of read.value.files) {
@@ -412,7 +467,16 @@ export function interpretRead(
     const deny = denial(exported);
     if (deny) return refusal(deny);
     const data = decodeAs(ExportAllow)(verdict(exported));
-    if (data === undefined) return fail("run_failed", "claude.ai returned an unreadable tab.");
+    if (data === undefined) {
+      return tooLarge(exported)
+        ? fail(
+            "run_failed",
+            bounded(
+              `The tab "${file.name}" is too large to read through Claude Code. Open the doc on claude.ai instead.`,
+            ),
+          )
+        : fail("run_failed", "claude.ai returned an unreadable tab.");
+    }
     const markdown = Buffer.from(data.data.bytes_b64, "base64").toString("utf8");
     tabs.push({ name: file.name, markdown: markdown.slice(0, Math.max(budget, 0)) });
     budget -= markdown.length;
@@ -443,66 +507,61 @@ function createdUrl(call: DocsCall): string | undefined {
   return slug === null ? undefined : claudeArtifactUrl(slug);
 }
 
-/** The write outcome is decided first, so a landed doc's link survives every later problem. */
+function sentExactly(call: DocsCall, sent: ReturnType<typeof createBatchInput>): boolean {
+  const input = decodeAs(CreateInput)(call.input);
+  return (
+    input !== undefined &&
+    input.batch.length === 0 &&
+    input.container.create.name === sent.container.create.name &&
+    input.container.create.doc.markdown === sent.container.create.doc.markdown
+  );
+}
+
+/** Every create is classified first, so each landed doc's link and each unknown one is reported. */
 export function interpretCreate(
   sent: ReturnType<typeof createBatchInput>,
   transcript: DocsTranscript,
 ): ClaudeArtifactWriteResult | ClaudeArtifactsError {
   const batches = transcript.calls.filter((call) => call.tool === "batch");
-  const landed = batches.filter(allowed);
-  const urls = landed.map(createdUrl).filter(Predicate.isNotUndefined);
-  const url = urls[0];
-  if (landed.length > 1) {
-    const others = urls.length > 1 ? ` The others: ${urls.slice(1).join(", ")}.` : "";
-    return fail(
-      "altered",
-      `Claude created ${landed.length} docs instead of one.${others} Delete the extras on claude.ai.`,
-      url,
-    );
-  }
-  if (batches.some((call) => call.result === undefined)) {
-    return fail(
-      "outcome_unknown",
-      url === undefined
-        ? "The create call was sent but its result was lost. Check claude.ai before trying again."
-        : "This doc was created, but another create call's result was lost. Check claude.ai before trying again.",
-      url,
-    );
-  }
+  const landed = batches.filter((call) => ackOf(call) === "allowed");
+  const unresolved = batches.filter((call) => ackOf(call) === "unknown").length;
   const stray = offPlan(transcript);
-  const [first] = landed;
-  if (first === undefined) {
+  if (landed.length === 0 && unresolved === 0) {
     if (stray) return fail("run_failed", stray);
-    if (batches.length === 0) return noDocsTools();
     const deny = batches.map(denial).findLast(Predicate.isNotUndefined);
-    return deny === undefined
-      ? fail(
-          "outcome_unknown",
-          "claude.ai returned an unreadable create result. Check claude.ai before trying again.",
-        )
-      : refusal(deny);
+    return deny === undefined ? noDocsTools() : refusal(deny);
   }
-  if (url === undefined) {
-    return fail("outcome_unknown", "claude.ai accepted the create but returned no link.");
+  const urls = landed.map(createdUrl).filter(Predicate.isNotUndefined);
+  const [url] = urls;
+  const exact = landed.every((call) => sentExactly(call, sent));
+  if (url !== undefined && landed.length === 1 && exact && unresolved === 0 && !stray) {
+    return { url };
   }
-  if (stray) return fail("altered", `The doc was created. ${stray}`, url);
-  const input = decodeAs(CreateInput)(first.input);
-  if (
-    input === undefined ||
-    input.batch.length > 0 ||
-    input.container.create.name !== sent.container.create.name ||
-    input.container.create.doc.markdown !== sent.container.create.doc.markdown
-  ) {
-    return fail(
-      "altered",
-      "The doc was created, but not with the exact markdown sent. Fix it with an edit instead of creating it again.",
-      url,
-    );
-  }
-  return { url };
+  const unlinked = landed.length - urls.length;
+  const message = [
+    landed.length > 1
+      ? `Claude created ${landed.length} docs instead of one${urls.length > 0 ? ` (${urls.join(", ")})` : ""}. Delete the extras on claude.ai.`
+      : landed.length === 1
+        ? `The doc was created${exact ? "." : ", but not with the exact markdown sent."}`
+        : undefined,
+    exact ? undefined : "Fix it with an edit instead of creating it again.",
+    unlinked > 0
+      ? `claude.ai returned no link for ${unlinked === 1 ? "a created doc" : `${unlinked} created docs`}. Find it on claude.ai.`
+      : undefined,
+    unresolved > 0
+      ? `${unresolved === 1 ? "A create call was" : `${unresolved} create calls were`} sent but claude.ai's answer was lost or unreadable. Check claude.ai before trying again.`
+      : undefined,
+    stray,
+  ]
+    .filter(Predicate.isNotUndefined)
+    .join(" ");
+  return fail(unresolved > 0 || unlinked > 0 ? "outcome_unknown" : "altered", message, url);
 }
 
-/** Any allowed update on the doc has landed, whatever later calls did, so its link is kept. */
+/**
+ * Every update is classified first. A landed update on the doc keeps its link whatever else
+ * happened; a refusal after the last one means part of the change did not land.
+ */
 export function interpretEdit(
   id: ClaudeArtifactId,
   transcript: DocsTranscript,
@@ -510,59 +569,58 @@ export function interpretEdit(
   const read = projectRead(id, transcript);
   const docIds = docIdsOf(id, read);
   const url = read?.value?.frame?.url ?? claudeArtifactUrl(id);
-  const updates = transcript.calls.filter((call) => call.tool === "update");
-  const onDoc = updates.filter((call) => docIds.has(targetDoc(call) ?? ""));
-  const elsewhere = updates.filter((call) => !onDoc.includes(call));
-  const landed = onDoc.some(allowed);
-  const landedUrl = landed ? url : undefined;
-  const editedElsewhere = elsewhere.filter(allowed).map((call) => targetDoc(call) ?? "no doc");
-  if (editedElsewhere.length > 0) {
-    return fail(
-      "altered",
-      `Claude edited another doc (${[...new Set(editedElsewhere)].join(", ")}). Check it on claude.ai.`,
-      landedUrl,
-    );
-  }
-  if (updates.some((call) => call.result === undefined)) {
-    return fail(
-      "outcome_unknown",
-      landed
-        ? "The edit landed, but another edit call's result was lost. Read the doc before trying again."
-        : "The edit was sent but its result was lost. Read the doc before trying again.",
-      landedUrl,
-    );
-  }
-  // A doc can pull in another doc's text, so reading one is off target too.
-  const offTarget = [
-    ...new Set([
-      ...elsewhere.map((call) => targetDoc(call) ?? "no doc"),
-      ...transcript.calls
-        .filter((call) => call.tool === "read")
-        .map(targetDoc)
-        .filter((target) => target !== undefined && !docIds.has(target)),
-    ]),
-  ];
+  const updates = transcript.calls
+    .filter((call) => call.tool === "update")
+    .map((call) => ({ call, ack: ackOf(call), doc: targetDoc(call) }));
+  const onDoc = updates.filter((update) => docIds.has(update.doc));
+  const elsewhere = updates.filter((update) => !docIds.has(update.doc));
+  const lastLanded = onDoc.findLastIndex((update) => update.ack === "allowed");
+  const landed = lastLanded >= 0;
+  const unresolved = updates.filter((update) => update.ack === "unknown").length;
+  const editedElsewhere = unique(
+    elsewhere.filter((update) => update.ack === "allowed").map((update) => update.doc),
+  );
+  const reached = unique([
+    ...elsewhere.map((update) => update.doc),
+    ...otherDocsRead(transcript, docIds),
+  ]).filter((doc) => !editedElsewhere.includes(doc));
   const stray = offPlan(transcript);
-  if (landed) {
-    if (offTarget.length > 0) {
-      return fail(
-        "altered",
-        `The edit landed, but Claude also reached other docs (${offTarget.join(", ")}). Check the doc.`,
-        url,
-      );
-    }
-    return stray ? fail("altered", `The edit landed. ${stray}`, url) : { url };
+  if (landed || unresolved > 0 || editedElsewhere.length > 0) {
+    const refusedLater = landed
+      ? onDoc
+          .slice(lastLanded + 1)
+          .map((update) => denial(update.call))
+          .findLast(Predicate.isNotUndefined)
+      : undefined;
+    const problems = [
+      editedElsewhere.length > 0
+        ? `Claude edited another doc (${editedElsewhere.join(", ")}). Check it on claude.ai.`
+        : undefined,
+      refusedLater
+        ? `claude.ai then refused a later change ${refusalDetail(refusedLater)}`
+        : undefined,
+      unresolved > 0
+        ? `${unresolved === 1 ? "An edit call was" : `${unresolved} edit calls were`} sent but claude.ai's answer was lost or unreadable. Read the doc before trying again.`
+        : undefined,
+      reached.length > 0 ? `Claude also reached other docs (${reached.join(", ")}).` : undefined,
+      stray,
+    ].filter(Predicate.isNotUndefined);
+    if (problems.length === 0) return { url };
+    return fail(
+      unresolved > 0 ? "outcome_unknown" : "altered",
+      [...(landed ? ["The edit landed."] : []), ...problems].join(" "),
+      landed ? url : undefined,
+    );
   }
   if (stray) return fail("run_failed", stray);
-  if (offTarget.length > 0) {
+  if (reached.length > 0) {
     return fail(
       "refused",
-      `Claude aimed outside this doc (${offTarget.join(", ")}). Check that doc on claude.ai.`,
+      `Claude aimed outside this doc (${reached.join(", ")}). Check that doc on claude.ai.`,
     );
   }
-  const deny = onDoc.map(denial).findLast(Predicate.isNotUndefined);
+  const deny = onDoc.map((update) => denial(update.call)).findLast(Predicate.isNotUndefined);
   if (deny) return refusal(deny);
-  if (onDoc.length > 0) return fail("run_failed", "claude.ai returned an unreadable edit result.");
   if (read !== undefined) {
     const denied = readDenial(read);
     if (denied) return denied;
@@ -690,7 +748,7 @@ export const makeClaudeDocs = Effect.fn("makeClaudeDocs")(function* (
 
   const run = Effect.fn("ClaudeDocs.run")(function* (plan: Plan, prompt: string) {
     const lines: Array<string> = [];
-    let initChecked = false;
+    let lockdown = UNCONFIRMED;
     const spawnCommand = yield* resolveSpawnCommand(
       settings.binaryPath || "claude",
       claudeDocsArgs(plan),
@@ -715,23 +773,28 @@ export const makeClaudeDocs = Effect.fn("makeClaudeDocs")(function* (
             Stream.splitLines,
             Stream.runForEach((line) => {
               lines.push(line);
-              if (initChecked) return Effect.void;
-              const ungated = ungatedTools(line);
-              if (ungated === undefined) return Effect.void;
-              initChecked = true;
-              return ungated.length === 0
-                ? Effect.void
-                : Effect.fail(
-                    new ClaudeDocsRunStopped({
-                      reason: `it loaded tools T3 Code cannot lock down: ${ungated.join(", ")}.`,
-                    }),
-                  );
+              lockdown = checkLockdown(lockdown, line);
+              const broken = lockdown.broken;
+              if (broken === undefined) return Effect.void;
+              // No grace period: an unlocked CLI must not get to run a tool.
+              return child
+                .kill({ killSignal: "SIGKILL" })
+                .pipe(
+                  Effect.ignore,
+                  Effect.andThen(Effect.fail(new ClaudeDocsRunStopped({ reason: `it ${broken}` }))),
+                );
             }),
           ),
+          // Drained to the end but kept short: stopping on noise could cut off a write mid-flight.
           child.stderr.pipe(
-            capBytes(MAX_STDERR_BYTES, "its error output was too large."),
             Stream.decodeText(),
-            Stream.mkString,
+            Stream.runFold(
+              () => "",
+              (kept, text) =>
+                kept.length >= MAX_STDERR_CHARS
+                  ? kept
+                  : kept + text.slice(0, MAX_STDERR_CHARS - kept.length),
+            ),
           ),
           child.exitCode,
         ],

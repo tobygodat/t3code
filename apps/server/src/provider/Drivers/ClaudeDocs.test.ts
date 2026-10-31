@@ -16,7 +16,9 @@ import {
   PLANS,
 } from "./ClaudeDocs.ts";
 
-// Sanitized stream-json from real `claude -p` runs against a test doc.
+// Sanitized stream-json from real `claude -p` runs against a test doc: ids, paths and account
+// fields are replaced, and the init line comes from a 2.1.314 run with claudeDocsArgs. Lines built
+// below are synthetic.
 const fixture = Effect.fn("fixture")(function* (name: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -31,6 +33,7 @@ const DOC_URL = "https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv";
 const SHORT_DOC = ClaudeArtifactId.make("AbCdEfGhIjKlMnOpQrStUv");
 const OTHER_DOC = "99999999-2222-4333-8444-555555555555";
 const EDIT_UPDATE_ID = "toolu_0115Y9VwwdcyQ6H91gUsEArH";
+const READ_EXPORT_ID = "toolu_01EHLJ8jHgXcxDb3ypkDrKKd";
 
 const init = (tools?: ReadonlyArray<string>) =>
   JSON.stringify({ type: "system", subtype: "init", ...(tools === undefined ? {} : { tools }) });
@@ -59,6 +62,12 @@ const prose = (text: string) =>
 const isResultFor = (id: string) => (line: string) =>
   line.includes('"type":"user"') && line.includes(id);
 
+const LOCKED = init(["ToolSearch", "Write"]);
+const readOther = [
+  toolUse("r9", "mcp__claude_ai_Claude_Docs__read", { ref: { object: "project", id: OTHER_DOC } }),
+  toolResult("r9", '{"verdict":"allow","value":{"name":"Other"},"files":[]}'),
+];
+
 const update = (id: string, doc: string) =>
   toolUse(id, "mcp__claude_ai_Claude_Docs__update", {
     ref: { object: "node", id: "n1" },
@@ -68,7 +77,7 @@ const update = (id: string, doc: string) =>
 it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
   describe("claudeDocsArgs", () => {
     const disallowed =
-      "Agent,Task,TaskOutput,TaskStop,Bash,BashOutput,KillShell,PowerShell,Read,Glob,Grep,LS,LSP,NotebookRead,ListMcpResourcesTool,ReadMcpResourceTool,CronCreate,CronDelete,CronList,Monitor,ListAgents,SendMessage,SendToProject,SendToProjectContext,RemoteTrigger,ScheduleWakeup,PushNotification,Workflow,DesignSync,EnterWorktree,ExitWorktree,ReportFindings,TodoWrite,AskUserQuestion,ExitPlanMode,EnterPlanMode,SlashCommand";
+      "Agent,Task,TaskOutput,TaskStop,Bash,BashOutput,KillShell,PowerShell,Read,Glob,Grep,LS,LSP,NotebookRead,ListMcpResourcesTool,ReadMcpResourceTool,ReadMcpResourceDirTool,WebFetch,CronCreate,CronDelete,CronList,Monitor,ListAgents,SendMessage,SendToProject,SendToProjectContext,RemoteTrigger,ScheduleWakeup,PushNotification,Workflow,DesignSync,EnterWorktree,ExitWorktree,ReportFindings,TodoWrite,AskUserQuestion,ExitPlanMode,EnterPlanMode,SlashCommand,Artifact,ArtifactData,ArtifactComments,ArtifactCheck,Sleep,Brief,REPL,StructuredOutput";
     it.each([
       ["read", "ToolSearch,mcp__claude_ai_Claude_Docs__read,mcp__claude_ai_Claude_Docs__export"],
       ["create", "ToolSearch,mcp__claude_ai_Claude_Docs__batch"],
@@ -126,7 +135,10 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
 
     const failures: ReadonlyArray<{
       readonly name: string;
-      readonly source: string | ReadonlyArray<string>;
+      readonly source:
+        | string
+        | ReadonlyArray<string>
+        | ((read: ReadonlyArray<string>) => ReadonlyArray<string>);
       readonly id: ClaudeArtifactId;
       readonly reason: string;
       readonly message?: unknown;
@@ -145,6 +157,50 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         reason: "run_failed",
       },
       {
+        name: "a CLI whose tool list is not a list of names",
+        source: (read) => [
+          JSON.stringify({ type: "system", subtype: "init", tools: null }),
+          ...read.slice(1),
+        ],
+        id: DOC,
+        reason: "run_failed",
+      },
+      {
+        name: "a CLI that calls tools before any init",
+        source: (read) => read.slice(1),
+        id: DOC,
+        reason: "run_failed",
+      },
+      {
+        name: "a CLI whose later init loads a tool dontAsk runs",
+        source: (read) => [...read, init(["CronList"])],
+        id: DOC,
+        reason: "run_failed",
+        message: expect.stringContaining("CronList"),
+      },
+      {
+        name: "a run that also read another doc",
+        source: (read) => [...read, ...readOther],
+        id: DOC,
+        reason: "run_failed",
+        message: expect.stringContaining(OTHER_DOC),
+      },
+      {
+        name: "a tab the CLI replaced for its size",
+        source: (read) =>
+          read.map((line) =>
+            isResultFor(READ_EXPORT_ID)(line)
+              ? toolResult(
+                  READ_EXPORT_ID,
+                  "Error: result (1,234,567 characters) exceeds maximum allowed tokens. Output has been saved to /tmp/claude-docs/export.txt.",
+                )
+              : line,
+          ),
+        id: DOC,
+        reason: "run_failed",
+        message: expect.stringContaining("too large"),
+      },
+      {
         name: "a doc this account cannot see",
         source: "read-denied",
         id: ClaudeArtifactId.make("00000000-0000-4000-8000-000000000000"),
@@ -159,6 +215,7 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       {
         name: "a run that never reached the connector",
         source: [
+          LOCKED,
           toolUse("t1", "ToolSearch", { query: "select:x" }),
           toolResult("t1", "No matches"),
           prose(`Done: ${DOC_URL}`),
@@ -175,7 +232,12 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
     ];
     it.effect.each(failures)("fails for $name", ({ source, id, reason, message }) =>
       Effect.gen(function* () {
-        const lines = typeof source === "string" ? yield* fixture(source) : source;
+        const lines =
+          typeof source === "string"
+            ? yield* fixture(source)
+            : typeof source === "function"
+              ? source(yield* fixture("read"))
+              : source;
         expect(interpretRead(id, collectConnectorCalls(lines, PLANS.read))).toMatchObject({
           reason,
           ...(message === undefined ? {} : { message }),
@@ -193,12 +255,6 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
             true,
           )
         : line;
-    const readOther = [
-      toolUse("r9", "mcp__claude_ai_Claude_Docs__read", {
-        ref: { object: "project", id: OTHER_DOC },
-      }),
-      toolResult("r9", '{"verdict":"allow","value":{"name":"Other"},"files":[]}'),
-    ];
     const cases: ReadonlyArray<
       readonly [
         name: string,
@@ -221,14 +277,25 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         { url: DOC_URL },
       ],
       [
-        "a landed update followed by a denied retry",
+        "a landed update followed by a refused one",
         DOC,
         (edit) => [
           ...edit,
           update("t9", DOC),
           toolResult("t9", '{"verdict":"deny","reason":"guard_mismatch"}', true),
         ],
-        { url: DOC_URL },
+        { reason: "altered", url: DOC_URL, message: expect.stringContaining("guard_mismatch") },
+      ],
+      [
+        "an update whose result has no verdict",
+        DOC,
+        (edit) =>
+          edit.map((line) =>
+            isResultFor(EDIT_UPDATE_ID)(line)
+              ? toolResult(EDIT_UPDATE_ID, "Error: upstream connection reset", true)
+              : line,
+          ),
+        { reason: "outcome_unknown" },
       ],
       [
         "an update with no result",
@@ -251,6 +318,27 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
           toolResult("t9", '{"verdict":"allow","rev":1}'),
         ],
         { reason: "altered", url: DOC_URL, message: expect.stringContaining(OTHER_DOC) },
+      ],
+      [
+        "an edit of another doc and an update with no result",
+        DOC,
+        (edit) => [
+          ...edit,
+          update("t9", OTHER_DOC),
+          toolResult("t9", '{"verdict":"allow","rev":1}'),
+          update("t10", DOC),
+        ],
+        { reason: "outcome_unknown", url: DOC_URL, message: expect.stringContaining(OTHER_DOC) },
+      ],
+      [
+        "a read that names no doc after the edit landed",
+        DOC,
+        (edit) => [
+          ...edit,
+          toolUse("r9", "mcp__claude_ai_Claude_Docs__read", { ref: { object: "node", id: "n9" } }),
+          toolResult("r9", '{"verdict":"allow","value":{}}'),
+        ],
+        { reason: "altered", url: DOC_URL, message: expect.stringContaining("no doc") },
       ],
       [
         "a read of another doc after the edit landed",
@@ -348,6 +436,36 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         { reason: "altered", url: DOC_URL, message: expect.stringContaining("WebFetch") },
       ],
       [
+        "altered markdown and a tool outside the plan",
+        [
+          toolUse("b1", batch, createBatchInput("Q3 plan", "Ship it.")),
+          toolResult("b1", ack),
+          toolUse("w1", "WebFetch", {}),
+        ],
+        { reason: "altered", url: DOC_URL, message: expect.stringMatching(/edit[\s\S]*WebFetch/) },
+      ],
+      [
+        "two births and a result with no verdict",
+        [
+          toolUse("b1", batch, sent),
+          toolResult("b1", ack),
+          toolUse("b2", batch, sent),
+          toolResult("b2", `{"verdict":"allow","created":{"bound":true}}\nOpen it: ${OTHER_URL}`),
+          toolUse("b3", batch, sent),
+          toolResult("b3", "Error: upstream connection reset", true),
+        ],
+        { reason: "outcome_unknown", url: DOC_URL, message: expect.stringContaining(OTHER_URL) },
+      ],
+      [
+        "a birth with no link and a lost result",
+        [
+          toolUse("b1", batch, sent),
+          toolResult("b1", '{"verdict":"allow","created":{"bound":true}}'),
+          toolUse("b2", batch, sent),
+        ],
+        { reason: "outcome_unknown", message: expect.stringContaining("no link") },
+      ],
+      [
         "a refusal",
         [
           toolUse("b1", batch, sent),
@@ -364,9 +482,9 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       ],
       ["no batch call", [prose("I could not find the tool.")], { reason: "connector_missing" }],
     ])("%s", (_name, lines, expected) => {
-      expect(interpretCreate(sent, collectConnectorCalls(lines, PLANS.create))).toMatchObject(
-        expected,
-      );
+      expect(
+        interpretCreate(sent, collectConnectorCalls([LOCKED, ...lines], PLANS.create)),
+      ).toMatchObject(expected);
     });
   });
 });
@@ -380,16 +498,19 @@ describe("makeClaudeDocs", () => {
     readonly expected: object;
   }> = [
     {
+      // A TERM would run the trap and leave a file in the run's directory.
       name: "kills a CLI that loads a tool dontAsk runs",
-      script: () => `printf '%s\\n' '${init(["ToolSearch", "CronList"])}'\nexec sleep 30`,
+      script: () =>
+        `trap 'touch got-term' TERM\nprintf '%s\\n' '${init(["ToolSearch", "CronList"])}'\nsleep 30 &\nwait`,
       call: "read",
       expected: { reason: "run_failed", message: expect.stringContaining("CronList") },
     },
     {
-      name: "kills a CLI that floods stderr",
-      script: () => "exec yes >&2",
-      call: "read",
-      expected: { reason: "run_failed", message: expect.stringContaining("too large") },
+      name: "keeps a landed edit's link through a flood of stderr",
+      script: (transcript) =>
+        `head -c 1000000 /dev/zero | tr '\\0' x >&2\ncat '${transcript}'\nexit 1`,
+      call: "edit",
+      expected: { reason: "outcome_unknown", url: DOC_URL },
     },
     {
       name: "keeps a landed edit unknown when the stream was cut off",
