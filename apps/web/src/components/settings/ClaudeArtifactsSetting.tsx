@@ -26,26 +26,20 @@ export function ClaudeArtifactsSetting({ disabled }: { readonly disabled: boolea
   const saveSettings = useAtomCommand(serverEnvironment.updateSettings, "Claude artifacts");
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const panelThread = useBrowserPanelThread();
-  const [saving, setSaving] = useState(false);
-  const [signInFailed, setSignInFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const docsInstanceId = pickClaudeDocsInstance(providers);
   const docsInstance = providers.find((provider) => provider.instanceId === docsInstanceId);
 
-  const signIn = async () => {
+  const openSignIn = async () => {
     const threadRef = await panelThread(CLAUDE_LOGIN_URL, primaryEnvironmentId);
-    if (threadRef === null) {
-      setSignInFailed(true);
-      return;
-    }
+    if (threadRef === null) return;
     const result = await openUrlInPreview({
       threadRef,
       url: CLAUDE_LOGIN_URL,
       openPreview,
       ...CLAUDE_PANEL_OPEN,
     });
-    if (isAtomCommandInterrupted(result)) return;
-    setSignInFailed(result._tag === "Failure");
-    if (result._tag === "Failure") {
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       toastManager.add({
         type: "error",
         title: "Could not open claude.ai",
@@ -54,17 +48,21 @@ export function ClaudeArtifactsSetting({ disabled }: { readonly disabled: boolea
     }
   };
 
+  const signIn = async () => {
+    setBusy(true);
+    await openSignIn();
+    setBusy(false);
+  };
+
   const change = async (checked: boolean) => {
     if (primaryEnvironmentId === null) return;
-    setSaving(true);
+    setBusy(true);
     const result = await saveSettings({
       environmentId: primaryEnvironmentId,
       input: { patch: { claudeArtifactsEnabled: checked } },
     });
-    setSaving(false);
-    if (result._tag !== "Success") return;
-    if (checked) await signIn();
-    else setSignInFailed(false);
+    if (result._tag === "Success" && checked) await openSignIn();
+    setBusy(false);
   };
 
   return (
@@ -88,14 +86,19 @@ export function ClaudeArtifactsSetting({ disabled }: { readonly disabled: boolea
       }
       control={
         <div className="flex items-center gap-2">
-          {enabled && signInFailed ? (
-            <Button size="sm" variant="outline" disabled={disabled} onClick={() => void signIn()}>
+          {enabled ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={disabled || busy}
+              onClick={() => void signIn()}
+            >
               Sign in
             </Button>
           ) : null}
           <Switch
             checked={enabled}
-            disabled={disabled || saving || primaryEnvironmentId === null}
+            disabled={disabled || busy || primaryEnvironmentId === null}
             onCheckedChange={(checked) => void change(Boolean(checked))}
             aria-label="Claude artifacts"
           />
