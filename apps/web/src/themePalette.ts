@@ -404,7 +404,12 @@ export function getStandardThemeColors(appearance: ThemeAppearance): ThemeColors
 // index.css paints the light bubble a step darker than the shared palette mobile uses.
 const STANDARD_WEB_PAINTED_COLORS: Record<ThemeAppearance, Partial<ThemeColors>> = {
   light: { messageSurface: "#ebebed" },
-  dark: { canvas: "#000000", messageSurface: "#1e1e1e" },
+  dark: {
+    canvas: "#171717",
+    surface: "#1b1b1b",
+    surfaceRaised: "#1b1b1b",
+    messageSurface: "#1e1e1e",
+  },
 };
 
 /** The standard theme as index.css paints it, for solves that measure the page. */
