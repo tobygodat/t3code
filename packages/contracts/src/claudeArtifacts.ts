@@ -34,6 +34,9 @@ export function parseClaudeArtifactRef(input: string): ClaudeArtifactId | null {
     : parseClaudeArtifactUrl(trimmed);
 }
 
+export const claudeArtifactUrl = (id: ClaudeArtifactId): string =>
+  `https://claude.ai/artifact/${id}`;
+
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const NON_SUBSCRIPTION_AUTH_TYPES: ReadonlySet<string> = new Set([
   "apiKey",
