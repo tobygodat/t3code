@@ -255,7 +255,8 @@ import {
   useThreadCheckpointSummaries,
 } from "../state/entities";
 import { useEnvironmentShellHasSnapshot } from "../state/shell";
-import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { type ChatComposerHandle } from "./chat/ChatComposer";
+import { ChatComposerWithUsageLimits } from "../fork/ChatComposerWithUsageLimits";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialogHost, openExpandedImagePreview } from "./chat/ExpandedImageDialog";
 import {
@@ -1931,6 +1932,12 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
+  const threadDetailsUsage = {
+    providerInstanceId: activeProviderInstanceId,
+    providers: providerStatuses,
+    sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
+    contextWindow: activeContextWindow,
+  };
   const supportsThreadPullRequests = serverConfig !== null;
   const visiblePullRequests = visibleThreadPullRequests(
     (activeThreadShell ?? activeThread)?.pullRequests ?? [],
@@ -3469,7 +3476,9 @@ export default function ChatView(props: ChatViewProps) {
                             />
                           ) : null}
                           {!composerMounted ? null : (
-                            <ChatComposer
+                            <ChatComposerWithUsageLimits
+                              usage={threadDetailsUsage}
+                              threadPanelOpen={threadPanelOpen}
                               canOperateThread={canOperateThread}
                               reportedModelSelection={reportedModelSelection}
                               multipleModelSelections={multipleModelSelections}
@@ -3786,12 +3795,7 @@ export default function ChatView(props: ChatViewProps) {
               onAddProjectScript={saveProjectScriptStable}
               onUpdateProjectScript={updateProjectScriptStable}
               onDeleteProjectScript={deleteProjectScriptStable}
-              usage={{
-                providerInstanceId: activeProviderInstanceId,
-                providers: providerStatuses,
-                sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
-                contextWindow: activeContextWindow,
-              }}
+              usage={threadDetailsUsage}
             />
 
             <PullRequestThreadDialogHost

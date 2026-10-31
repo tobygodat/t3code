@@ -7,6 +7,7 @@ import {
 } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import { ComposerUsageLimits } from "~/fork/ComposerUsageLimits";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -168,6 +169,7 @@ export function ContextWindowMeter(props: {
               ) : null}
             </>
           ) : null}
+          <ComposerUsageLimits />
         </div>
       </PopoverPopup>
     </Popover>
