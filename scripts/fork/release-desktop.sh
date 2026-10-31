@@ -16,12 +16,17 @@
 # previous (the bundle last replaced), build.log, and one folder per version.
 # Each bundle records its commit as T3ForkCommit in Info.plist.
 #
+# Git commands run in T3_FORK_REPO, any checkout of the fork, which defaults to
+# the checkout holding this script. A scheduled run passes it and pipes in
+# origin/main's copy of this script, so the schedule always runs the latest one.
+#
 # Signing uses the identity from scripts/fork/create-signing-identity.sh when
 # it exists, and an ad-hoc signature otherwise.
 #
 # Exit codes:
 #   0   installed, or already up to date
-#   64  bad arguments
+#   64  bad arguments, or T3_FORK_REPO or T3_FORK_RELEASE_WORKTREE is not an
+#       absolute path to a usable checkout
 #   73  another release run holds the lock; nothing was done
 #   74  processes still have their working directory in the release worktree;
 #       the notification names them
@@ -109,6 +114,13 @@ while [ $# -gt 0 ]; do
     --force) force=1; shift ;;
     --install-staged) install_only=1; shift ;;
     *) echo "Unknown argument: $1" >&2; usage ;;
+  esac
+done
+
+for setting in "T3_FORK_REPO=${T3_FORK_REPO:-}" "T3_FORK_RELEASE_WORKTREE=${T3_FORK_RELEASE_WORKTREE:-}"; do
+  case ${setting#*=} in
+    "" | /*) ;;
+    *) fail "$exit_usage" "${setting%%=*} must be an absolute path, not ${setting#*=}." ;;
   esac
 done
 
@@ -209,8 +221,11 @@ if [ "$install_only" -eq 1 ]; then
   exit 0
 fi
 
-script_dir=$(cd "$(dirname "$0")" && pwd -P)
-common_dir=$(git -C "$script_dir" rev-parse --path-format=absolute --git-common-dir)
+script_dir=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P || true)
+repo=${T3_FORK_REPO:-$script_dir}
+# git -C "" would use the current folder, so an empty path counts as no checkout.
+common_dir=$([ -n "$repo" ] && git -C "$repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+  fail "$exit_usage" "${repo:-The folder of this script} is not a checkout of the fork. Set T3_FORK_REPO to one."
 default_worktree="$(dirname "$(dirname "$common_dir")")/t3code-release"
 worktree=${T3_FORK_RELEASE_WORKTREE:-$default_worktree}
 
@@ -225,6 +240,7 @@ refuse() {
 
 if [ -e "$worktree" ]; then
   worktree=$(cd "$worktree" && pwd -P)
+  # sh reads its script as it runs, so resetting the worktree that holds it would corrupt the run.
   case "$script_dir/" in
     "$worktree"/*) refuse "This script runs from inside the release worktree $worktree." ;;
   esac
@@ -250,15 +266,15 @@ run_unlocked() {
   return "$run_status"
 }
 
-run_unlocked git -C "$script_dir" fetch --quiet origin main
-commit=$(git -C "$script_dir" rev-parse --verify --quiet "$ref^{commit}") || refuse "Unknown ref $ref."
-short=$(git -C "$script_dir" rev-parse --short "$commit")
+run_unlocked git -C "$repo" fetch --quiet origin main
+commit=$(git -C "$repo" rev-parse --verify --quiet "$ref^{commit}") || refuse "Unknown ref $ref."
+short=$(git -C "$repo" rev-parse --short "$commit")
 
 # The commit that completes the fork's isolation code; without it, the build would share the
 # official app's T3 home and keychain item. Its PR must be merged into main with a merge commit,
 # not squashed or rebased, so this commit stays in main's history.
 isolation_commit=3952dc1910ffd5f7ee0d233f69fcf45742aade79
-git -C "$script_dir" merge-base --is-ancestor "$isolation_commit" "$commit" ||
+git -C "$repo" merge-base --is-ancestor "$isolation_commit" "$commit" ||
   refuse "$ref ($short) does not contain the fork's isolation code ($isolation_commit). If main has \
 that code under another commit because its PR was squashed or rebased, set isolation_commit in \
 scripts/fork/release-desktop.sh to that commit."
@@ -299,8 +315,8 @@ if [ -d "$worktree" ]; then
   git -C "$worktree" reset --quiet --hard
   git -C "$worktree" checkout --quiet --detach "$commit"
 else
-  git -C "$script_dir" worktree prune
-  git -C "$script_dir" worktree add --quiet --detach "$worktree" "$commit"
+  git -C "$repo" worktree prune
+  git -C "$repo" worktree add --quiet --detach "$worktree" "$commit"
   : >"$(release_marker "$worktree")"
 fi
 # The desktop build's own lock. Nothing works in the worktree, so any left behind is stale.
