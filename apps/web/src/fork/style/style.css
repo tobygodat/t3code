@@ -2,6 +2,10 @@
    Each piece is gated by its token in data-fork-style on <html> (fork/style/features.ts) and
    applies to the default dark theme only, like fork/theme.css. Unlayered rules here beat
    Tailwind's layered utilities without !important. */
+[data-fork-effort-tiles] {
+  display: none;
+}
+
 :root.dark:where(:not([data-theme-id]), [data-theme-id=""]) {
   --fork-content: #ebebeb;
   --fork-ink-50: color-mix(in srgb, var(--fork-content) 50%, transparent);
@@ -190,5 +194,239 @@
         stroke-width: 1.3125;
       }
     }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    /* MonoCode popover-open. Popovers drop T3's scale transition so it neither fights the
+       keyframe nor holds the popup open on close. */
+    &[data-fork-style~="popover-open"] {
+      &
+        :is(
+          [data-slot="menu-popup"],
+          [data-slot="popover-popup"].dropdown-glass,
+          [data-slot="select-popup"]
+        ) {
+        animation: fork-popover-open 170ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+
+        &[data-side="bottom"] {
+          --fork-popover-lift: -8px;
+        }
+
+        &[data-side="top"] {
+          --fork-popover-lift: 8px;
+        }
+
+        &:is([data-side="right"], [data-side="inline-end"]) {
+          --fork-popover-shift: -8px;
+        }
+
+        &:is([data-side="left"], [data-side="inline-start"]) {
+          --fork-popover-shift: 8px;
+        }
+      }
+
+      & [data-slot="popover-popup"].dropdown-glass {
+        transition-property: width, height;
+      }
+    }
+
+    /* MonoCode prompt-turn-reveal on rows fork/style/turnRise.ts marks as arrived. */
+    &[data-fork-style~="turn-rise"] [data-fork-arrived] {
+      animation: fork-turn-rise 320ms var(--fork-ease-out) both;
+    }
+
+    /* MonoCode approval-toast-in. The keyframe moves with translate and scale, so the
+       stacking transform T3 sets on each toast keeps working underneath it. */
+    &[data-fork-style~="toast-drop"] [data-slot="toast-viewport"] > [data-position] {
+      --fork-toast-drop: -8px;
+      animation: fork-toast-drop 180ms var(--fork-ease-out);
+
+      &[data-position*="bottom"] {
+        --fork-toast-drop: 8px;
+      }
+
+      &[data-starting-style] {
+        transform: none;
+      }
+    }
+  }
+
+  /* MonoCode ModelPicker effort tiles. */
+  & [data-slot="menu-radio-item"]:has(> [data-fork-effort-tiles]) {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+
+    &:has(> [data-fork-effort-tiles="ultra"]) {
+      --fork-effort-color: #a855f7;
+    }
+
+    &:has(> [data-fork-effort-tiles="max"]) {
+      --fork-effort-color: #f4b942;
+    }
+
+    &::after {
+      box-sizing: border-box;
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      border-radius: inherit;
+      content: "";
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    & > :not([data-fork-effort-tiles]) {
+      position: relative;
+      z-index: 1;
+    }
+
+    & > [data-fork-effort-tiles] {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      display: grid;
+      grid-template-columns: repeat(32, minmax(0, 1fr));
+      grid-template-rows: repeat(5, minmax(0, 1fr));
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 160ms var(--fork-ease-out);
+      mask-image:
+        linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent),
+        linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
+      mask-composite: intersect;
+    }
+
+    & [data-fork-effort-tile] {
+      box-shadow: inset -1px -1px 0 color-mix(in srgb, var(--fork-effort-color) 32%, transparent);
+    }
+
+    &:is(:hover, :focus-visible, [data-highlighted]) {
+      & > [data-fork-effort-tiles] {
+        animation: fork-effort-tiles-clear 5000ms linear 1 both;
+      }
+
+      & [data-fork-effort-tile="filled"] {
+        animation: fork-effort-tile-fill 1400ms ease-out 3 both;
+        animation-delay: calc(var(--tile-distance) * 420ms);
+        will-change: background-color;
+      }
+
+      &::after {
+        animation: fork-effort-edge-ripple 5000ms ease-in-out 1 both;
+        will-change: box-shadow, opacity;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      & > [data-fork-effort-tiles] {
+        transition: none;
+      }
+
+      &:is(:hover, :focus-visible, [data-highlighted]) {
+        & > [data-fork-effort-tiles] {
+          animation: none;
+          opacity: 0.72;
+          visibility: visible;
+        }
+
+        &::after {
+          animation: none;
+          opacity: 0.42;
+          box-shadow: none;
+          will-change: auto;
+        }
+
+        & [data-fork-effort-tile="filled"] {
+          animation: none;
+          background-color: var(--fork-effort-color);
+          will-change: auto;
+        }
+      }
+    }
+  }
+}
+
+@keyframes fork-popover-open {
+  from {
+    opacity: 0;
+    transform: translate(var(--fork-popover-shift, 0), var(--fork-popover-lift, 0)) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fork-turn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fork-toast-drop {
+  from {
+    opacity: 0;
+    translate: 0 var(--fork-toast-drop);
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+    scale: none;
+  }
+}
+
+@keyframes fork-effort-tiles-clear {
+  0%,
+  92% {
+    opacity: 1;
+    visibility: visible;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes fork-effort-tile-fill {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  26% {
+    background-color: var(--fork-effort-color);
+  }
+  52% {
+    background-color: color-mix(in srgb, var(--fork-effort-color) 18%, transparent);
+  }
+}
+
+@keyframes fork-effort-edge-ripple {
+  0%,
+  12%,
+  26%,
+  40%,
+  54%,
+  68%,
+  82% {
+    opacity: 0.3;
+    box-shadow: inset 0 0 4px 0 transparent;
+  }
+  19%,
+  47%,
+  75% {
+    opacity: 0.85;
+    box-shadow: inset 0 0 12px 1px color-mix(in srgb, var(--fork-effort-color) 55%, transparent);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: inset 0 0 4px 0 transparent;
   }
 }

@@ -44,6 +44,7 @@ import { ComposerControl, ComposerControlIcon, type ComposerControlSize } from "
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
 import { EffortGlyph, resolveEffortGlyph } from "./EffortGlyph";
+import { EffortTileShimmer } from "../../fork/style/EffortTileShimmer";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
@@ -459,6 +460,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                     closeOnClick
                     disabled={ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id}
                   >
+                    <EffortTileShimmer descriptorId={descriptor.id} value={option.id} />
                     <span className="flex w-full min-w-0 flex-col">
                       <span className="flex min-w-0 items-center gap-1">
                         <span className="min-w-0 truncate">{option.label}</span>
