@@ -5,10 +5,13 @@
 # by hand. It does nothing when the identity already exists.
 #
 # The identity lives in its own keychain, ~/.t3-fork/signing, with a random
-# password kept beside it. It never touches the login keychain or the keychain
-# search list, and needs no admin rights or trust setting: codesign signs with
-# an untrusted self-signed certificate, and a locally built app never meets
-# Gatekeeper. scripts/fork/release-desktop.sh uses it when present.
+# password kept beside it, readable only by you. It never touches the login
+# keychain. security create-keychain leaves the user's keychain search list
+# alone (checked on macOS 27), and codesign is pointed at the keychain by path.
+# It needs no admin rights or trust setting: codesign signs with an untrusted
+# self-signed certificate, and a locally built app never meets Gatekeeper.
+# scripts/fork/release-desktop.sh uses it when present, unlocking the keychain
+# to sign and locking it again afterwards.
 #
 # To go back to ad-hoc signing, delete ~/.t3-fork/signing.
 set -eu

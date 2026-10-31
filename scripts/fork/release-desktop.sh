@@ -350,8 +350,11 @@ plist="$app/Contents/Info.plist"
 signing_keychain="$signing_dir/signing.keychain-db"
 if [ -f "$signing_dir/keychain-password" ]; then
   security unlock-keychain -p "$(cat "$signing_dir/keychain-password")" "$signing_keychain"
+  signed=0
   codesign --force --deep --keychain "$signing_keychain" --sign "$signing_identity" "$app" \
-    2>>"$releases/build.log"
+    2>>"$releases/build.log" && signed=1
+  security lock-keychain "$signing_keychain"
+  [ "$signed" -eq 1 ] || die "Could not sign $app with $signing_identity."
 else
   codesign --force --deep --sign - "$app" 2>>"$releases/build.log"
 fi
