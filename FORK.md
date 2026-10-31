@@ -28,6 +28,25 @@ This is Toby's fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code), 
 
 - Any other non-zero exit: git itself failed, such as a fetch error or a push rejected because `origin/main` moved mid-run. Run it again.
 
+## The fork as a desktop app
+
+The fork installs as **T3 Code Fork** (`~/Applications/T3 Code Fork.app`, bundle ID `com.tobygodat.t3code.fork`) and runs beside the official app. It keeps its T3 home in `~/.t3-fork` and its Electron profile in `~/Library/Application Support/t3code-fork`, so it shares no threads, settings or keychain item with the official install.
+
+`scripts/fork/release-desktop.sh` builds and installs it. It needs Rust, which the desktop build compiles its resource monitor with: `brew install rustup`, then `rustup default stable`.
+
+- By default it builds `origin/main`, and skips the build when that commit was already built. `--ref <commit-ish>` builds another commit, and `--force` rebuilds.
+- It builds in a detached `t3code-release` worktree next to the main checkout, then patches the bundle: its own bundle ID, no URL schemes, `LSEnvironment` that sets the data folder, turns off updates and sets `T3CODE_DESKTOP_STAGE_LABEL=Fork`, then an ad-hoc signature.
+- While T3 Code Fork runs, the new build waits in `~/.t3-fork/releases` and the script exits 75. Quit the app and run `scripts/fork/release-desktop.sh --install-staged`, or let the next run install it. The bundle it replaced stays in `~/.t3-fork/releases/previous`.
+- Exit 0 means installed or already up to date. Any other code is a failure; `~/.t3-fork/releases/build.log` has the build output.
+
+Run it on a schedule, such as a T3 Code scheduled task after the morning upstream sync. Each run fetches `origin/main` and posts a macOS notification when it installs or stages a build.
+
+What to expect:
+
+- macOS may ask for permissions again after each rebuild, because each ad-hoc signature is new.
+- `t3code://` links and sign-in callbacks open the official app, so cloud sign-in does not work in the fork app.
+- It never updates itself. New builds come only from this script.
+
 ## Keeping conflicts rare
 
 Every line the fork changes in an upstream file can conflict later. So:
