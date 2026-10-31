@@ -18,6 +18,7 @@ export function ComposerUsageLimits() {
   const value = use(ComposerUsageLimitsContext);
   if (!value || value.panelShowsUsage) return null;
   // The usage section and its rows carry the details card's insets; trim them to the popover's.
+  // Usage rows are the section grid's only tabbable children.
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-2 has-[>div:last-child:empty]:hidden">
       <div className="font-medium text-muted-foreground text-xs">Usage</div>

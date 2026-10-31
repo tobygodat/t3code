@@ -56,7 +56,9 @@
 
   /* An image layer over upstream's hover and open fills, so they add to the rest fill instead of replacing it. */
   & [data-thread-details-card] [role="group"][aria-label="Open in editor"] {
-    background-image: linear-gradient(rgb(235 235 235 / 10%), rgb(235 235 235 / 10%));
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--contrast-foreground) 10%, transparent) 0 0
+    );
 
     & :is(button, svg) {
       color: var(--contrast-foreground);
