@@ -26,8 +26,9 @@
 #       release worktree; nothing was done
 #   75  built and staged, but the fork app is running; quit it and run again,
 #       or wait for the next scheduled run
-#   1   anything else failed; see build.log. Every exit other than 0, 73 and 75
-#       posts a macOS notification.
+#   1   anything else failed; see build.log
+#   129, 130, 143  stopped by SIGHUP, SIGINT or SIGTERM
+# Every exit other than 0, 73 and 75 posts a macOS notification.
 set -eu
 
 app_name="T3 Code Fork"
@@ -43,46 +44,52 @@ plist_buddy=/usr/libexec/PlistBuddy
 exit_usage=64
 exit_busy=73
 exit_staged=75
-# lockf exits 75 when the lock is busy, so the locked run reports staged as 76 and the wrapper maps it back.
-exit_lock_busy=75
-exit_staged_locked=76
+exit_lockf_busy=75
+
+failure=
+child=
+unlocked_keychain=
 
 notify() {
-  osascript -e "display notification \"$1\" with title \"$app_name\"" >/dev/null 2>&1 || true
+  osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title (item 2 of argv)' \
+    -e 'end run' "$1" "$app_name" >/dev/null 2>&1 || true
+}
+
+fail() {
+  failure=$2
+  echo "$2" >&2
+  exit "$1"
 }
 
 die() {
-  echo "$1" >&2
-  exit 1
+  fail 1 "$1"
 }
 
 on_exit() {
   status=$?
+  [ -z "$unlocked_keychain" ] || security lock-keychain "$unlocked_keychain" 2>/dev/null || true
   case $status in
-    0 | "$exit_busy" | "$exit_staged_locked") ;;
-    *) notify "Release failed (exit $status). See $releases/build.log." ;;
+    0 | "$exit_busy" | "$exit_staged") ;;
+    *) notify "${failure:-Release failed (exit $status). See $releases/build.log.}" ;;
   esac
 }
 
-# The kernel drops the lock when its holder exits or dies, so a killed run never blocks the next.
-if [ "${T3_FORK_RELEASE_LOCKED:-}" != 1 ]; then
-  mkdir -p "$releases"
-  status=0
-  T3_FORK_RELEASE_LOCKED=1 /usr/bin/lockf -s -k -t 0 "$releases/.release.lock" /bin/sh "$0" "$@" ||
-    status=$?
-  case $status in
-    "$exit_lock_busy")
-      echo "Another release run is in progress." >&2
-      exit "$exit_busy"
-      ;;
-    "$exit_staged_locked") exit "$exit_staged" ;;
-    *) exit "$status" ;;
-  esac
-fi
+# A trap runs only once the foreground command ends, so long commands run in the background and
+# the script waits for them. The trap stops that command, but processes a build started can
+# outlive it; the next run's working-directory check refuses until they end.
+on_signal() {
+  [ -z "$child" ] || kill -TERM "$child" 2>/dev/null || true
+  failure="Release stopped by SIG$1."
+  exit "$2"
+}
+
+trap on_exit EXIT
+trap 'on_signal HUP 129' HUP
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
 
 usage() {
-  echo "Usage: $0 [--ref <commit-ish>] [--force] | --install-staged" >&2
-  exit "$exit_usage"
+  fail "$exit_usage" "Usage: release-desktop.sh [--ref <commit-ish>] [--force] | --install-staged"
 }
 
 ref=origin/main
@@ -101,8 +108,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-trap on_exit EXIT
-trap 'exit 130' INT TERM HUP
+# fd 9 holds the lock for this run and every process it starts, so a run orphaned by a killed
+# parent still holds it. Commands that may leave a daemon behind run with fd 9 closed.
+mkdir -p "$releases" 2>/dev/null || die "Could not create $releases."
+command exec 9>>"$releases/.release.lock" ||
+  die "Could not open the lock file $releases/.release.lock."
+lock_status=0
+/usr/bin/lockf -s -t 0 9 || lock_status=$?
+case $lock_status in
+  0) ;;
+  "$exit_lockf_busy") echo "Another release run is in progress." >&2; exit "$exit_busy" ;;
+  *) die "Could not lock $releases/.release.lock (lockf exit $lock_status)." ;;
+esac
 
 running_from() {
   ps -axo comm= | grep -qF "$1/"
@@ -155,7 +172,7 @@ install_pending() {
   if fork_app_running; then
     notify "$version is ready. Quit $app_name to install it."
     echo "Staged $app_name $version; it installs once every copy of $app_name quits."
-    exit "$exit_staged_locked"
+    exit "$exit_staged"
   fi
   [ ! -e "$swap_old" ] || die "$swap_old is still in use; leaving $version staged."
   mkdir -p "$(dirname "$install_path")"
@@ -219,7 +236,17 @@ if [ -e "$worktree" ]; then
   [ -f "$marker" ] || refuse "$worktree was not created by this script (no $marker)."
 fi
 
-git -C "$script_dir" fetch --quiet origin main
+# Waits in the background, so a signal reaches the trap while the command runs.
+run_unlocked() {
+  "$@" 9>&- &
+  child=$!
+  run_status=0
+  wait "$child" || run_status=$?
+  child=
+  return "$run_status"
+}
+
+run_unlocked git -C "$script_dir" fetch --quiet origin main
 commit=$(git -C "$script_dir" rev-parse --verify --quiet "$ref^{commit}") || refuse "Unknown ref $ref."
 short=$(git -C "$script_dir" rev-parse --short "$commit")
 
@@ -290,7 +317,7 @@ started=$(date +%s)
 rm -rf "$worktree/release"
 # A caller's T3CODE_DESKTOP_* or GITHUB_REPOSITORY would leak into the build; without an update
 # repository the build writes no app-update.yml.
-if ! (
+build() (
   for name in $(env | sed -n 's/^\(T3CODE_DESKTOP_[A-Za-z0-9_]*\)=.*/\1/p'); do
     unset "$name"
   done
@@ -299,7 +326,8 @@ if ! (
     vp i --frozen-lockfile &&
     vp run dist:desktop:artifact --platform mac --target zip --arch arm64 \
       --build-version "$version"
-) >"$releases/build.log" 2>&1; then
+)
+if ! run_unlocked build >"$releases/build.log" 2>&1; then
   tail -n 40 "$releases/build.log" >&2
   echo "Build of $short failed." >&2
   exit 1
@@ -344,11 +372,13 @@ plist="$app/Contents/Info.plist"
 
 signing_keychain="$signing_dir/signing.keychain-db"
 if [ -f "$signing_dir/keychain-password" ]; then
+  unlocked_keychain=$signing_keychain
   security unlock-keychain -p "$(cat "$signing_dir/keychain-password")" "$signing_keychain"
   signed=0
   codesign --force --deep --keychain "$signing_keychain" --sign "$signing_identity" "$app" \
     2>>"$releases/build.log" && signed=1
   security lock-keychain "$signing_keychain"
+  unlocked_keychain=
   [ "$signed" -eq 1 ] || die "Could not sign $app with $signing_identity."
 else
   codesign --force --deep --sign - "$app" 2>>"$releases/build.log"
