@@ -190,7 +190,13 @@ fi
 
 script_dir=$(cd "$(dirname "$0")" && pwd -P)
 common_dir=$(git -C "$script_dir" rev-parse --path-format=absolute --git-common-dir)
-worktree=${T3_FORK_RELEASE_WORKTREE:-"$(dirname "$(dirname "$common_dir")")/t3code-release"}
+default_worktree="$(dirname "$(dirname "$common_dir")")/t3code-release"
+worktree=${T3_FORK_RELEASE_WORKTREE:-$default_worktree}
+
+# Marks a worktree this script created, so it never resets someone else's.
+release_marker() {
+  echo "$(git -C "$1" rev-parse --path-format=absolute --git-dir)/t3-fork-release"
+}
 
 refuse() {
   die "$1 Refusing to build."
@@ -207,6 +213,17 @@ if [ -e "$worktree" ]; then
     refuse "$worktree is inside another checkout, not a worktree of its own."
   [ "$(git -C "$worktree" rev-parse --path-format=absolute --git-dir)" != "$common_dir" ] ||
     refuse "$worktree is the main checkout."
+  ! git -C "$worktree" symbolic-ref -q HEAD >/dev/null ||
+    refuse "$worktree has a branch checked out, and the release worktree is always detached."
+  marker=$(release_marker "$worktree")
+  if [ ! -f "$marker" ]; then
+    # Release worktrees made before the marker existed sit at the default path, detached and clean.
+    [ "$worktree" = "$(cd "$default_worktree" 2>/dev/null && pwd -P)" ] &&
+      [ -z "$(git -C "$worktree" status --porcelain)" ] ||
+      refuse "$worktree was not created by this script (no $marker)."
+    echo "Marking $worktree as the release worktree." >&2
+    : >"$marker"
+  fi
 fi
 
 git -C "$script_dir" fetch --quiet origin main
@@ -233,13 +250,22 @@ if [ "$force" -eq 0 ]; then
 fi
 
 if [ -d "$worktree" ]; then
+  # A build left running by a killed run still works here; resetting under it would break both.
+  users=$(lsof -a -d cwd -Fpn 2>/dev/null | awk -v dir="$worktree" '
+    /^p/ { pid = substr($0, 2) }
+    /^n/ { path = substr($0, 2); if (path == dir || index(path, dir "/") == 1) print pid }')
+  if [ -n "$users" ]; then
+    echo "Processes $(echo $users) still work in $worktree. Let them finish, or stop them." >&2
+    exit "$exit_busy"
+  fi
   git -C "$worktree" reset --quiet --hard
   git -C "$worktree" checkout --quiet --detach "$commit"
 else
   git -C "$script_dir" worktree prune
   git -C "$script_dir" worktree add --quiet --detach "$worktree" "$commit"
+  : >"$(release_marker "$worktree")"
 fi
-# The desktop build's own lock; any left behind is stale while we hold ours.
+# The desktop build's own lock. Nothing works in the worktree, so any left behind is stale.
 rm -rf "$worktree/.desktop-build.lock"
 
 base_version=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' "$worktree/apps/server/package.json")
