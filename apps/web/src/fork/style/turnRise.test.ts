@@ -61,5 +61,10 @@ describe("turn rise arrivals", () => {
 
     list.show("thread-a", ["a1", "a2"], 100);
     expect(list.arrived("a2", 100)).toBe(false);
+
+    list.show("thread-a", ["a1", "a2", "a3"], 200);
+    list.show("thread-b", ["b1", "b2"], 220);
+    list.show("thread-a", ["a1", "a2", "a3"], 250);
+    expect(list.arrived("a3", 250)).toBe(false);
   });
 });

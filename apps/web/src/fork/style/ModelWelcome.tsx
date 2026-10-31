@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { observeResize } from "../../lib/observeResize";
-import { useForkStyleFeature } from "./store";
+import { isForkStyleFeatureEnabled, useForkStyleFeature } from "./store";
 import "./welcome.css";
 
 type WelcomeKind = "astra" | "opus";
@@ -17,8 +17,13 @@ type WelcomeKind = "astra" | "opus";
 const ASTRA_MS = 7600;
 const OPUS_MS = 7000;
 
-let current: { readonly kind: WelcomeKind; readonly run: number } | null = null;
+let current: {
+  readonly kind: WelcomeKind;
+  readonly run: number;
+  readonly threadKey: string;
+} | null = null;
 let runs = 0;
+let expiry: number | undefined;
 const listeners = new Set<() => void>();
 
 function setCurrent(next: typeof current) {
@@ -32,9 +37,22 @@ function welcomeKind(model: string): WelcomeKind | null {
   return null;
 }
 
-export function announceModelPick(model: string): void {
-  const kind = welcomeKind(model);
-  setCurrent(kind === null ? null : { kind, run: ++runs });
+/** The scene expires on its own clock, so a pick never replays later in another pane or thread. */
+export function announceModelPick(model: string, threadKey: string): void {
+  window.clearTimeout(expiry);
+  const kind = isForkStyleFeatureEnabled("model-welcome") ? welcomeKind(model) : null;
+  if (kind === null) {
+    setCurrent(null);
+    return;
+  }
+  const run = ++runs;
+  setCurrent({ kind, run, threadKey });
+  expiry = window.setTimeout(
+    () => {
+      if (current?.run === run) setCurrent(null);
+    },
+    kind === "astra" ? ASTRA_MS : OPUS_MS,
+  );
 }
 
 function subscribe(listener: () => void) {
@@ -45,14 +63,14 @@ function subscribe(listener: () => void) {
 const dismiss = () => setCurrent(null);
 
 /** One-shot scene over the chat pane after a model pick. Mount inside the pane's positioned box. */
-export function ModelWelcome() {
+export function ModelWelcome({ threadKey }: { threadKey: string }) {
   const enabled = useForkStyleFeature("model-welcome");
   const welcome = useSyncExternalStore(
     subscribe,
     () => current,
     () => null,
   );
-  if (!enabled || welcome === null) return null;
+  if (!enabled || welcome === null || welcome.threadKey !== threadKey) return null;
   return welcome.kind === "astra" ? (
     <AstraWelcome key={welcome.run} />
   ) : (
@@ -60,8 +78,8 @@ export function ModelWelcome() {
   );
 }
 
-function useDismissAfter(durationMs: number) {
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- ends the one-shot scene on a timer, or at once when the system asks for reduced motion
+function useDismissOnReducedMotion() {
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- ends the scene at once when the system asks for reduced motion
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     if (reducedMotion.matches) {
@@ -71,13 +89,9 @@ function useDismissAfter(durationMs: number) {
     const onMotionChange = () => {
       if (reducedMotion.matches) dismiss();
     };
-    const timer = window.setTimeout(dismiss, durationMs);
     reducedMotion.addEventListener("change", onMotionChange);
-    return () => {
-      window.clearTimeout(timer);
-      reducedMotion.removeEventListener("change", onMotionChange);
-    };
-  }, [durationMs]);
+    return () => reducedMotion.removeEventListener("change", onMotionChange);
+  }, []);
 }
 
 const STARS = Array.from({ length: 38 }, (_, index) => ({
@@ -106,7 +120,7 @@ const SPARKLES = Array.from({ length: 36 }, (_, index) => ({
 }));
 
 function AstraWelcome() {
-  useDismissAfter(ASTRA_MS);
+  useDismissOnReducedMotion();
   return (
     <div
       data-fork-welcome="astra"
@@ -220,7 +234,7 @@ function sceneLayout({ width, height }: Stage) {
 }
 
 function OpusWelcome() {
-  useDismissAfter(OPUS_MS);
+  useDismissOnReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const [stage, setStage] = useState<Stage>();
 

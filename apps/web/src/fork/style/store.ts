@@ -55,6 +55,10 @@ export function setForkStyleFeature(id: ForkStyleFeatureId, on: boolean): void {
   emit();
 }
 
+export function isForkStyleFeatureEnabled(id: ForkStyleFeatureId): boolean {
+  return enabled.has(id);
+}
+
 export function useForkStyleFeature(id: ForkStyleFeatureId): boolean {
   return useSyncExternalStore(
     subscribe,

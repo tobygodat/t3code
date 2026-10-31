@@ -3408,7 +3408,7 @@ export default function ChatView(props: ChatViewProps) {
               )}
             </div>
 
-            <ModelWelcome />
+            <ModelWelcome threadKey={routeThreadKey} />
             <div
               {...composerArea}
               ref={(overlay: HTMLDivElement | null) => {
