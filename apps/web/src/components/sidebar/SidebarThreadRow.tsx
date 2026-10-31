@@ -36,9 +36,9 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
-  CircleDotDashedIcon,
   ClockIcon,
   GitBranchIcon,
+  HourglassIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
@@ -517,7 +517,7 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
 
 const TOP_STATUS_ICONS = {
   working: CircleDashedIcon,
-  waiting: CircleDotDashedIcon,
+  waiting: HourglassIcon,
   input: MessageCircleQuestionIcon,
   request: UserRoundIcon,
   approval: ShieldQuestionIcon,

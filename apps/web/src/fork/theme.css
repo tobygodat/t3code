@@ -1,0 +1,67 @@
+/* Fork restyle: MonoCode's calm dark surfaces and brighter ink tiers.
+   Dark mode on the default theme only. Named themes set data-theme-id and keep their palettes.
+   Ink is #ebebeb over #171717, as opaque tiers: 100% #ebebeb, 70% #ababab, 60% #969696.
+   Chat body text keeps upstream's contrast-aware 90% of the foreground. */
+:root {
+  /* Keep in sync with THREAD_DETAILS_CARD_WIDTH. */
+  --thread-details-panel-width: 13.75rem;
+}
+
+/* At that width the default bar minimum truncates labels such as "Weekly · Fable". */
+[data-thread-details-card] section[aria-label="Usage"] > .grid {
+  grid-template-columns: auto minmax(2rem, 1fr) auto;
+  column-gap: 0.5rem;
+}
+
+:root.dark:where(:not([data-theme-id]), [data-theme-id=""]) {
+  --background: #171717;
+  --surface-raised: #1b1b1b;
+  --card: #1b1b1b;
+  --popover: #1b1b1b;
+  --foreground: #ebebeb;
+  --card-foreground: #ebebeb;
+  --popover-foreground: #ebebeb;
+  --secondary-foreground: #ebebeb;
+  --accent-foreground: #ebebeb;
+  --muted-foreground: #ababab;
+  --secondary-label: #969696;
+  --placeholder: #969696;
+  --icon-muted: #969696;
+  --border: rgb(235 235 235 / 7%);
+
+  & [data-app-sidebar] {
+    --background: #151515;
+    --card: #151515;
+    --sidebar: #151515;
+    --muted: rgb(235 235 235 / 5%);
+    --accent: rgb(235 235 235 / 8%);
+    --accent-foreground: #ebebeb;
+    --foreground: #ebebeb;
+    --sidebar-foreground: #ebebeb;
+    --muted-foreground: #ababab;
+    --sidebar-muted-foreground: #ababab;
+    --secondary-label: #969696;
+    --placeholder: #969696;
+    --icon-muted: #969696;
+    --border: rgb(235 235 235 / 7%);
+    --sidebar-row-hover: color-mix(in srgb, var(--contrast-foreground) 5%, transparent);
+    --sidebar-row-selected: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
+    --sidebar-row-active: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
+  }
+
+  & [data-thread-details-card] {
+    border-radius: 12px;
+    box-shadow: 0 14px 32px -18px rgb(0 0 0 / 75%);
+  }
+
+  /* An image layer over upstream's hover and open fills, so they add to the rest fill instead of replacing it. */
+  & [data-thread-details-card] [role="group"][aria-label="Open in editor"] {
+    background-image: linear-gradient(
+      color-mix(in srgb, var(--contrast-foreground) 10%, transparent) 0 0
+    );
+
+    & :is(button, svg) {
+      color: var(--contrast-foreground);
+    }
+  }
+}

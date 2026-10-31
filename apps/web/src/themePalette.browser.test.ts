@@ -2,6 +2,7 @@ import { converter } from "culori/fn";
 import { describe, expect, it } from "vite-plus/test";
 
 import "~/index.css";
+import "~/fork/theme.css";
 import { getStandardPaintedThemeColors } from "./themePalette";
 
 const toRgb = converter("rgb");

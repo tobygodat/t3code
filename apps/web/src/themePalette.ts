@@ -28,6 +28,7 @@ import {
   contextChipColorVariable,
   type ContextChipAccentKind,
 } from "./lib/contextChipAccents";
+import { FORK_STANDARD_PAINTED_COLORS } from "./fork/paintedColors";
 
 import { appAtomRegistry, subscribeAtomChanges } from "./rpc/atomRegistry";
 import { primaryServerEnvironmentThemesAtom } from "./state/server";
@@ -409,7 +410,11 @@ const STANDARD_WEB_PAINTED_COLORS: Record<ThemeAppearance, Partial<ThemeColors>>
 
 /** The standard theme as index.css paints it, for solves that measure the page. */
 export function getStandardPaintedThemeColors(appearance: ThemeAppearance): ThemeColors {
-  return { ...getStandardThemeColors(appearance), ...STANDARD_WEB_PAINTED_COLORS[appearance] };
+  return {
+    ...getStandardThemeColors(appearance),
+    ...STANDARD_WEB_PAINTED_COLORS[appearance],
+    ...FORK_STANDARD_PAINTED_COLORS[appearance],
+  };
 }
 
 type ThemeRgbColor = {
