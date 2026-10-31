@@ -65,20 +65,23 @@ owned=$(git ls-tree -r --name-only "$ours" |
   git check-attr --source="$ours" --stdin merge |
   sed -n 's/: merge: fork-owned$//p')
 
-# A plain push, so this fails instead of clobbering origin/main if it moved.
-git push --quiet origin "$merged:refs/heads/main"
-echo "Pulled $count upstream commits into origin/main ($(git rev-parse --short "$merged"))."
-
+# Listed before the push, so a failure here can't follow a push that already landed.
+touched=
 if [ -n "$owned" ]; then
   base=$(git merge-base "$ours" "$theirs")
   old_ifs=$IFS
   IFS='
 '
   # shellcheck disable=SC2086 # one path per line
-  touched=$(git log --no-merges --format='  %h %s' "$base..$theirs" -- $owned)
+  touched=$(git --literal-pathspecs log --no-merges --format='  %h %s' "$base..$theirs" -- $owned)
   IFS=$old_ifs
-  if [ -n "$touched" ]; then
-    echo "Upstream commits that touched fork-owned files. Where the fork had changed a file, its version was kept:"
-    echo "$touched"
-  fi
+fi
+
+# A plain push, so this fails instead of clobbering origin/main if it moved.
+git push --quiet origin "$merged:refs/heads/main"
+echo "Pulled $count upstream commits into origin/main ($(git rev-parse --short "$merged"))."
+
+if [ -n "$touched" ]; then
+  echo "Upstream commits that touched fork-owned files. Where the fork had changed a file, its version was kept:"
+  echo "$touched"
 fi

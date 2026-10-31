@@ -82,7 +82,7 @@ For small changes:
 When the fork rewrites an upstream file outright, mark it fork-owned in `.gitattributes`:
 
 ```gitattributes
-apps/web/src/components/chat/ComposerPrimaryActions.tsx merge=fork-owned
+apps/web/src/fork/rewritten/Example.tsx merge=fork-owned
 ```
 
 The sync script defines `fork-owned` as "keep ours". When both sides changed an owned file, the merge keeps the fork's version without a conflict, and the script lists the upstream commits it left out. Port any you want by hand. It reads attributes from `origin/main`'s tree (`git --attr-source`, git 2.42 or newer), so the checkout it runs in doesn't matter.
