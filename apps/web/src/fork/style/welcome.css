@@ -1,0 +1,517 @@
+/* Ported from MonoCode (MIT, github.com/hardbeat920/monocode). See fork/MONOCODE-LICENSE.
+   AstraWelcome.css and OpusWelcome.css, keyed on data attributes. Shown on the default dark
+   theme only, like the rest of fork/style. */
+[data-fork-welcome] {
+  display: none;
+}
+
+:root.dark:where(:not([data-theme-id]), [data-theme-id=""]) [data-fork-welcome] {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root [data-fork-welcome] {
+    display: none;
+  }
+}
+
+[data-fork-welcome="astra"] {
+  --star-color: #d8c9a2;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+  container-type: size;
+  animation: fork-astra-welcome-fade var(--astra-duration) ease-out both;
+}
+
+[data-astra~="glow"] {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 82% 12%, #d8c9a226, transparent 48%),
+    radial-gradient(ellipse at 100% 0%, #d8c9a212, transparent 65%),
+    radial-gradient(ellipse at 15% 75%, #d8c9a214, transparent 60%);
+  box-shadow: inset 0 0 45px #d8c9a208;
+  animation: fork-astra-nebula-fade var(--astra-duration) ease-in-out both;
+}
+
+/* Keep the solar focal point small and above the composer, even in splits. */
+[data-astra~="solar-system"] {
+  position: absolute;
+  left: 82%;
+  top: clamp(58px, 15%, 120px);
+  width: clamp(46px, 10cqw, 86px);
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  animation: fork-astra-solar-arrival 6s ease-out both;
+}
+
+[data-astra~="solar-core"] {
+  position: absolute;
+  inset: 28%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 35%, #f5f0e4, #d8c9a2 35%, #a89560 75%);
+  box-shadow:
+    0 0 16px #d8c9a290,
+    0 0 42px #d8c9a245;
+}
+
+[data-astra~="solar-core"]::after {
+  content: "";
+  position: absolute;
+  inset: -65%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #d8c9a21f, transparent 70%);
+}
+
+[data-astra~="solar-corona"] {
+  position: absolute;
+  inset: -90%;
+  border-radius: 50%;
+  background: repeating-conic-gradient(#d8c9a238 0deg 2deg, transparent 2deg 15deg);
+  mask-image: radial-gradient(circle, transparent 12%, #000 22%, transparent 65%);
+  animation: fork-astra-corona-turn var(--astra-duration) linear both;
+}
+
+[data-astra~="solar-wave"] {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--star-color);
+  border-radius: 50%;
+  animation: fork-astra-solar-wave 3.2s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+
+[data-astra~="late"] {
+  animation-delay: 0.85s;
+}
+
+[data-astra~="solar-orbit"] {
+  position: absolute;
+  inset: -45%;
+  transform: rotate(-28deg) scaleY(0.38);
+}
+
+[data-astra~="outer"] {
+  inset: -70%;
+  transform: rotate(48deg) scaleY(0.32);
+}
+
+[data-astra~="solar-orbit"] > span {
+  position: absolute;
+  inset: 0;
+  border: 1px solid #d8c9a235;
+  border-radius: 50%;
+  animation: fork-astra-orbit-turn var(--astra-duration) linear both;
+}
+
+[data-astra~="solar-orbit"] > span::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--star-color);
+  box-shadow: 0 0 8px var(--star-color);
+}
+
+[data-astra~="outer"] > span {
+  border-color: #d8c9a230;
+  animation-direction: reverse;
+}
+
+[data-astra~="sparkle"] {
+  position: absolute;
+  left: var(--spark-x);
+  top: var(--spark-y);
+  width: var(--spark-size);
+  height: var(--spark-size);
+  border-radius: 50%;
+  background: var(--star-color);
+  box-shadow: 0 0 7px var(--star-color);
+  opacity: 0;
+  animation: fork-astra-sparkle-bloom var(--spark-duration) ease-in-out var(--spark-delay) both;
+}
+
+[data-astra~="cross"] {
+  border-radius: 0;
+  background: linear-gradient(transparent, #f5f0e4, transparent);
+  clip-path: polygon(50% 0, 61% 38%, 100% 50%, 61% 61%, 50% 100%, 38% 61%, 0 50%, 38% 38%);
+}
+
+[data-astra~="star-flight"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: fork-astra-star-fall var(--star-duration) linear var(--star-delay) both;
+}
+
+[data-astra~="star"] {
+  position: absolute;
+  left: var(--star-x);
+  top: var(--star-y);
+  width: var(--star-length);
+  height: var(--star-width);
+  border-radius: 100%;
+  background: linear-gradient(to right, #f5f0e4, var(--star-color) 12%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--star-color) 35%, transparent);
+  transform: rotate(-55deg);
+  transform-origin: left center;
+}
+
+[data-astra~="star"]::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #f5f0e4;
+  box-shadow: 0 0 6px 1px var(--star-color);
+}
+
+@keyframes fork-astra-nebula-fade {
+  from {
+    opacity: 0;
+  }
+  25%,
+  55% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes fork-astra-solar-arrival {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  16% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  62% {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes fork-astra-corona-turn {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(45deg);
+  }
+}
+
+@keyframes fork-astra-orbit-turn {
+  from {
+    transform: rotate(15deg);
+  }
+  to {
+    transform: rotate(235deg);
+  }
+}
+
+@keyframes fork-astra-solar-wave {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  15% {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 0;
+    transform: scale(4.5);
+  }
+}
+
+@keyframes fork-astra-sparkle-bloom {
+  from {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  30% {
+    opacity: 0.7;
+    transform: translateY(4px) scale(1);
+  }
+  65% {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.7);
+  }
+}
+
+@keyframes fork-astra-star-fall {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  12% {
+    opacity: var(--star-brightness);
+  }
+  70% {
+    opacity: var(--star-brightness);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-70cqh, 100cqh);
+  }
+}
+
+@keyframes fork-astra-welcome-fade {
+  0% {
+    opacity: 0;
+  }
+  8%,
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+[data-fork-welcome="opus"] {
+  --opus-clay: #d97757;
+  --opus-note: #f4ede4;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+  animation: fork-opus-welcome-fade var(--opus-duration) ease-out both;
+}
+
+[data-opus~="glow"] {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 82% 14%, #d9775724, transparent 46%),
+    radial-gradient(ellipse at 40% 18%, #d9775712, transparent 60%),
+    radial-gradient(ellipse at 10% 85%, #f4ede40c, transparent 55%);
+  box-shadow: inset 0 0 50px #d9775708;
+  animation: fork-opus-glow-breathe var(--opus-duration) ease-in-out both;
+}
+
+/* Rising motes: small thoughts drifting up while the phrase is written. */
+[data-opus~="mote"] {
+  position: absolute;
+  left: var(--mote-x);
+  top: var(--mote-y);
+  width: var(--mote-size);
+  height: var(--mote-size);
+  border-radius: 50%;
+  background: var(--opus-clay);
+  box-shadow: 0 0 6px #d9775780;
+  opacity: 0;
+  animation: fork-opus-mote-rise var(--mote-duration) ease-out var(--mote-delay) both;
+}
+
+[data-opus~="ring"] {
+  width: calc(var(--mote-size) * 2.2);
+  height: calc(var(--mote-size) * 2.2);
+  background: transparent;
+  border: 1px solid #d9775799;
+  box-shadow: none;
+}
+
+/* The composition's band beside the composer; its layout is set in pixels. */
+[data-opus~="stage"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+/* The staff rises from the lower left and runs off the right edge. */
+[data-opus~="staff"] {
+  position: absolute;
+  inset: 0;
+}
+
+[data-opus~="staff-line"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  /* A soft pen edge sweeps left to right, so each line writes itself. */
+  mask-image: linear-gradient(90deg, #000 42%, transparent 58%);
+  mask-size: 250% 100%;
+  mask-repeat: no-repeat;
+  animation:
+    fork-opus-line-write 2.3s cubic-bezier(0.55, 0.1, 0.3, 1) var(--line-delay) both,
+    fork-opus-line-settle var(--opus-duration) ease-in-out both;
+}
+
+[data-opus~="staff-line"] path {
+  fill: none;
+  stroke: var(--opus-clay);
+  stroke-width: 1px;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+[data-opus~="staff-line"]:nth-child(3) path {
+  opacity: 0.8;
+}
+
+[data-opus~="note"] {
+  position: absolute;
+  left: var(--note-x);
+  top: var(--note-y);
+  width: calc(var(--note-size) * 1.45);
+  height: var(--note-size);
+  translate: -50% -50%;
+  opacity: 0;
+  animation: fork-opus-note-play 3.6s cubic-bezier(0.2, 0.9, 0.3, 1.2) var(--note-delay) both;
+}
+
+[data-opus~="note-head"] {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--opus-note);
+  box-shadow:
+    0 0 6px #d9775799,
+    0 0 14px #d9775740;
+  transform: rotate(-22deg);
+}
+
+/* Each note rings once as it lands, like a key being struck. */
+[data-opus~="note"]::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  border: 1px solid var(--opus-clay);
+  border-radius: 50%;
+  opacity: 0;
+  animation: fork-opus-note-ring 1.1s ease-out var(--note-delay) both;
+}
+
+[data-opus~="note"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 45%;
+  width: max(1px, calc(var(--note-size) * 0.12));
+  height: calc(var(--note-size) * 3.1);
+  border-radius: 1px;
+  background: var(--opus-note);
+  opacity: 0.85;
+}
+
+[data-opus~="stem-down"]::after {
+  right: auto;
+  left: 0;
+  top: 45%;
+  bottom: auto;
+}
+
+@keyframes fork-opus-glow-breathe {
+  from {
+    opacity: 0;
+  }
+  22%,
+  58% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes fork-opus-mote-rise {
+  from {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  25% {
+    opacity: 0.55;
+    transform: translate(calc(var(--mote-drift) * 0.3), -10px) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--mote-drift), -46px) scale(0.8);
+  }
+}
+
+@keyframes fork-opus-line-write {
+  from {
+    mask-position: 100% 0;
+  }
+  to {
+    mask-position: 0 0;
+  }
+}
+
+@keyframes fork-opus-line-settle {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes fork-opus-note-play {
+  from {
+    opacity: 0;
+    transform: translateY(-40%) scale(0.2);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  60% {
+    opacity: 0.9;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(18%);
+  }
+}
+
+@keyframes fork-opus-note-ring {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  20% {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+@keyframes fork-opus-welcome-fade {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

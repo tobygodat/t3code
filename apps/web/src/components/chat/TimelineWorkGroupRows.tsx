@@ -53,6 +53,7 @@ import {
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
+import { ForkMascot } from "../../fork/style/ForkMascot";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
   anchorKey,
@@ -293,8 +294,10 @@ export function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
   return (
     <div className="border-b border-border/60 pb-2 pt-1">
       <div className="flex h-6 min-w-0 items-baseline gap-2 px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
+        <ForkMascot status="working" />
         <span
-          ref={shimmer ? observeVisibleAnimation : undefined}
+          ref={observeVisibleAnimation}
+          data-fork-working-label=""
           className="relative shrink-0 overflow-hidden whitespace-nowrap"
         >
           {label}

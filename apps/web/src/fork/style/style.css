@@ -1,0 +1,604 @@
+/* Ported from MonoCode (MIT, github.com/hardbeat920/monocode). See fork/MONOCODE-LICENSE.
+   Each piece is gated by its token in data-fork-style on <html> (fork/style/features.ts) and
+   applies to the default dark theme only, like fork/theme.css. Unlayered rules here beat
+   Tailwind's layered utilities without !important. */
+[data-fork-effort-tiles],
+[data-fork-mascot] {
+  display: none;
+}
+
+:root.dark:where(:not([data-theme-id]), [data-theme-id=""]) {
+  --fork-content: #ebebeb;
+  --fork-ink-50: color-mix(in srgb, var(--fork-content) 50%, transparent);
+  --fork-ink-70: color-mix(in srgb, var(--fork-content) 70%, transparent);
+  --fork-stroke: color-mix(in srgb, var(--fork-content) 10%, transparent);
+  --fork-row-hover: color-mix(in srgb, var(--fork-content) 5%, transparent);
+  --fork-selection: color-mix(in srgb, var(--fork-content) 10%, transparent);
+  --fork-selection-hover: color-mix(in srgb, var(--fork-content) 15%, transparent);
+  --fork-selection-emphasis: color-mix(in srgb, var(--fork-content) 20%, transparent);
+  --fork-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --fork-feedback-duration: 120ms;
+
+  /* MonoCode SecondaryButton and title-bar icon buttons. */
+  &[data-fork-style~="buttons"] {
+    /* Zero Tailwind's shadow layers, not box-shadow itself, so focus rings survive. */
+    & [data-slot="button"],
+    & [data-slot="button"]::before {
+      --tw-shadow: 0 0 #0000;
+      --tw-inset-shadow: 0 0 #0000;
+    }
+
+    /* Buttons that opt out of a hover fill upstream keep that choice. */
+    & [data-slot="button"]:is([data-variant="outline"], [data-variant="secondary"]) {
+      border-color: var(--fork-stroke);
+      background-color: transparent;
+      color: var(--fork-ink-70);
+      --control-icon-color: currentColor;
+
+      &:is(:hover, [data-pressed], [data-popup-open]):not([class*="hover:bg-transparent"]) {
+        background-color: var(--fork-selection);
+        color: var(--fork-content);
+      }
+    }
+
+    & [data-slot="button"]:is([data-variant="ghost"], [data-variant="ghost-muted"]) {
+      color: var(--fork-ink-70);
+      --control-icon-color: currentColor;
+
+      &[data-size^="icon"] {
+        color: var(--fork-ink-50);
+      }
+
+      &:is(:hover, [data-pressed], [data-popup-open]):not([class*="hover:bg-transparent"]) {
+        background-color: var(--fork-selection);
+        color: var(--fork-content);
+      }
+    }
+  }
+
+  /* MonoCode selection tiers on rows and popup items. */
+  &[data-fork-style~="row-fills"] {
+    & [data-app-sidebar] {
+      --sidebar-row-hover: var(--fork-row-hover);
+      --sidebar-row-selected: var(--fork-selection);
+      --sidebar-row-active: var(--fork-selection);
+    }
+
+    &
+      :is(
+        [data-slot="menu-popup"],
+        [data-slot="select-popup"],
+        [data-slot="popover-popup"],
+        [data-slot="command-dialog-popup"]
+      ) {
+      --accent: var(--fork-selection);
+    }
+
+    & [data-slot="menu-radio-item"][data-checked],
+    & [data-slot="select-item"][data-selected] {
+      background-color: var(--fork-selection);
+    }
+
+    & [data-slot="toggle"]:is([data-pressed], [aria-pressed="true"]) {
+      background-color: var(--fork-selection-emphasis);
+    }
+
+    &
+      :is(
+        [data-slot="menu-item"],
+        [data-slot="menu-checkbox-item"],
+        [data-slot="menu-radio-item"],
+        [data-slot="menu-sub-trigger"],
+        [data-slot="select-item"]
+      ):not([data-density="touch"]) {
+      min-height: 1.75rem;
+      border-radius: 0.5rem;
+      font-size: 13px;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      &
+        :is(
+          [data-sidebar-row],
+          [data-slot="menu-item"],
+          [data-slot="menu-checkbox-item"],
+          [data-slot="menu-radio-item"],
+          [data-slot="menu-sub-trigger"],
+          [data-slot="select-item"],
+          [data-slot="command-item"]
+        ) {
+        transition:
+          background-color var(--fork-feedback-duration) var(--fork-ease-out),
+          opacity 150ms ease;
+      }
+    }
+  }
+
+  /* MonoCode Popover frame over T3's glass fill, which stays readable over busy content. */
+  &[data-fork-style~="glass"] {
+    & .dropdown-glass {
+      --glass-blur: 24px;
+      border-color: var(--fork-stroke);
+      box-shadow:
+        0 20px 25px -5px rgb(0 0 0 / 0.1),
+        0 8px 10px -6px rgb(0 0 0 / 0.1);
+    }
+
+    &
+      :is(
+        [data-slot="menu-popup"],
+        [data-slot="popover-popup"].dropdown-glass,
+        [data-slot="select-popup"],
+        [data-slot="select-popup"] > .dropdown-glass
+      ) {
+      border-radius: 0.75rem;
+    }
+
+    & [data-slot="menu-separator"] {
+      margin-block: 0.25rem;
+      background-color: var(--fork-stroke);
+    }
+
+    & :is([data-slot="menu-label"], [data-slot="select-group-label"]) {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.025em;
+      color: color-mix(in srgb, var(--fork-content) 40%, transparent);
+    }
+  }
+
+  /* MonoCode composer pills and the plain variant for the toolbar under the composer. */
+  &[data-fork-style~="composer-controls"] {
+    /* T3 tucks the effort chip under the model chip with a negative margin; filled pills collide. */
+    & [data-composer-chip="sm"][data-composer-shortcut~="composer.effort"] {
+      margin-inline-start: 0.125rem;
+    }
+
+    & [data-composer-chip="sm"] {
+      height: 1.625rem;
+      gap: 0.25rem;
+      padding-inline: 0.375rem;
+      border-radius: 0.375rem;
+      background-color: var(--fork-selection);
+      color: var(--fork-content);
+      font-size: 11px;
+
+      &:hover {
+        background-color: var(--fork-selection-hover);
+      }
+
+      &:is([data-popup-open], [data-pressed], [aria-pressed="true"]) {
+        background-color: var(--fork-selection-emphasis);
+      }
+
+      & svg[data-composer-control-chevron] {
+        width: 0.75rem;
+        height: 0.75rem;
+        color: var(--fork-ink-50);
+      }
+    }
+
+    & [data-composer-chip="xs"] {
+      border-radius: 0.375rem;
+      font-size: 12px;
+      color: color-mix(in srgb, var(--fork-content) 85%, transparent);
+
+      &:hover {
+        background-color: color-mix(in srgb, var(--fork-content) 6%, transparent);
+      }
+
+      &:is([data-popup-open], [data-pressed], [aria-pressed="true"]) {
+        background-color: color-mix(in srgb, var(--fork-content) 8%, transparent);
+      }
+    }
+
+    & [data-composer-send] {
+      width: 1.625rem;
+      height: 1.625rem;
+      border-radius: 0.375rem;
+
+      & > svg path[stroke] {
+        stroke-width: 1.3125;
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    /* MonoCode popover-open. Popovers drop T3's scale transition so it neither fights the
+       keyframe nor holds the popup open on close. */
+    &[data-fork-style~="popover-open"] {
+      &
+        :is(
+          [data-slot="menu-popup"],
+          [data-slot="popover-popup"].dropdown-glass,
+          [data-slot="select-popup"]
+        ) {
+        animation: fork-popover-open 170ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+
+        &[data-side="bottom"] {
+          --fork-popover-lift: -8px;
+        }
+
+        &[data-side="top"] {
+          --fork-popover-lift: 8px;
+        }
+
+        &:is([data-side="right"], [data-side="inline-end"]) {
+          --fork-popover-shift: -8px;
+        }
+
+        &:is([data-side="left"], [data-side="inline-start"]) {
+          --fork-popover-shift: 8px;
+        }
+      }
+
+      & [data-slot="popover-popup"].dropdown-glass {
+        transition-property: width, height;
+      }
+    }
+
+    /* MonoCode prompt-turn-reveal on rows fork/style/turnRise.ts marks as arrived. */
+    &[data-fork-style~="turn-rise"] [data-fork-arrived] {
+      animation: fork-turn-rise 320ms var(--fork-ease-out) backwards;
+    }
+
+    /* MonoCode approval-toast-in. The keyframe moves with translate and scale, so the
+       stacking transform T3 sets on each toast keeps working underneath it. */
+    &[data-fork-style~="toast-drop"] [data-slot="toast-viewport"] > [data-position] {
+      --fork-toast-drop: -8px;
+      animation: fork-toast-drop 180ms var(--fork-ease-out);
+
+      &[data-position*="bottom"] {
+        --fork-toast-drop: 8px;
+      }
+
+      &[data-starting-style] {
+        transform: none;
+      }
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    /* MonoCode Shimmer on the Working label, unless T3 already shimmers it. */
+    &[data-fork-style~="working-shimmer"]
+      [data-fork-working-label]:not(:has(.live-activity-focus)) {
+      --fork-shimmer-spread: 30px;
+      background-image:
+        linear-gradient(
+          90deg,
+          transparent calc(50% - var(--fork-shimmer-spread)),
+          var(--fork-content) 50%,
+          transparent calc(50% + var(--fork-shimmer-spread))
+        ),
+        linear-gradient(
+          color-mix(in srgb, var(--fork-content) 40%, transparent),
+          color-mix(in srgb, var(--fork-content) 40%, transparent)
+        );
+      background-size:
+        250% 100%,
+        auto;
+      background-repeat: no-repeat, padding-box;
+      background-clip: text;
+      color: transparent;
+      animation: fork-shimmer-text 1s linear infinite;
+      animation-play-state: var(--visible-animation-state, paused);
+    }
+
+    /* MonoCode zen-thinking-pulse in place of T3's shimmer on the live Thinking row. */
+    &[data-fork-style~="thinking-pulse"]
+      [data-timeline-row-kind="thinking"]
+      :has(> .live-activity-focus) {
+      animation: fork-thinking-pulse 1.8s ease-in-out infinite;
+      animation-play-state: var(--visible-animation-state, paused);
+
+      & > .live-activity-focus {
+        display: none;
+      }
+    }
+  }
+
+  /* MonoCode PixelMascot: idle bobs and blinks, working hops and chews. */
+  &[data-fork-style~="mascot"] [data-fork-mascot] {
+    display: block;
+    flex-shrink: 0;
+
+    &[data-fork-mascot="working"] {
+      align-self: center;
+      width: 1rem;
+      height: 1rem;
+    }
+
+    &[data-fork-mascot="idle"] {
+      width: 1.75rem;
+      height: 1.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    & [data-pixel="frame-b"],
+    & [data-pixel="eyes-closed"] {
+      opacity: 0;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      & [data-pixel="bob"] {
+        animation: fork-pixel-bob 3.6s step-end infinite;
+      }
+
+      & [data-pixel="hop"] {
+        animation: fork-pixel-bob 1.2s step-end infinite;
+      }
+
+      & [data-pixel="frame-a"] {
+        animation: fork-pixel-frame-a 600ms step-end infinite;
+      }
+
+      & [data-pixel="frame-b"] {
+        animation: fork-pixel-frame-b 600ms step-end infinite;
+      }
+
+      & [data-pixel="eyes-open"] {
+        animation: fork-pixel-eyes-open 5.2s step-end infinite;
+        animation-delay: var(--fork-blink-delay);
+      }
+
+      & [data-pixel="eyes-closed"] {
+        animation: fork-pixel-eyes-closed 5.2s step-end infinite;
+        animation-delay: var(--fork-blink-delay);
+      }
+
+      /* After the shorthands above, which reset the play state. */
+      & [data-pixel] {
+        animation-play-state: var(--visible-animation-state, paused);
+      }
+    }
+  }
+
+  /* MonoCode ModelPicker effort tiles. */
+  & [data-slot="menu-radio-item"]:has([data-fork-effort-tiles]) {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+
+    &:has([data-fork-effort-tiles="ultra"]) {
+      --fork-effort-color: #a855f7;
+    }
+
+    &:has([data-fork-effort-tiles="max"]) {
+      --fork-effort-color: #f4b942;
+    }
+
+    &::after {
+      box-sizing: border-box;
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      border-radius: inherit;
+      content: "";
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    & [data-fork-effort-tiles] ~ * {
+      position: relative;
+      z-index: 1;
+    }
+
+    & [data-fork-effort-tiles] {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      display: grid;
+      grid-template-columns: repeat(32, minmax(0, 1fr));
+      grid-template-rows: repeat(5, minmax(0, 1fr));
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 160ms var(--fork-ease-out);
+      mask-image:
+        linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent),
+        linear-gradient(to bottom, transparent, #000 35%, #000 65%, transparent);
+      mask-composite: intersect;
+    }
+
+    & [data-fork-effort-tile] {
+      box-shadow: inset -1px -1px 0 color-mix(in srgb, var(--fork-effort-color) 32%, transparent);
+    }
+
+    &:is(:hover, :focus-visible, [data-highlighted]) {
+      & [data-fork-effort-tiles] {
+        animation: fork-effort-tiles-clear 5000ms linear 1 both;
+      }
+
+      & [data-fork-effort-tile="filled"] {
+        animation: fork-effort-tile-fill 1400ms ease-out 3 both;
+        animation-delay: calc(var(--tile-distance) * 420ms);
+        will-change: background-color;
+      }
+
+      &::after {
+        animation: fork-effort-edge-ripple 5000ms ease-in-out 1 both;
+        will-change: box-shadow, opacity;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      & [data-fork-effort-tiles] {
+        transition: none;
+      }
+
+      &:is(:hover, :focus-visible, [data-highlighted]) {
+        & [data-fork-effort-tiles] {
+          animation: none;
+          opacity: 0.72;
+          visibility: visible;
+        }
+
+        &::after {
+          animation: none;
+          opacity: 0.42;
+          box-shadow: none;
+          will-change: auto;
+        }
+
+        & [data-fork-effort-tile="filled"] {
+          animation: none;
+          background-color: var(--fork-effort-color);
+          will-change: auto;
+        }
+      }
+    }
+  }
+}
+
+@keyframes fork-popover-open {
+  from {
+    opacity: 0;
+    transform: translate(var(--fork-popover-shift, 0), var(--fork-popover-lift, 0)) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fork-turn-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fork-toast-drop {
+  from {
+    opacity: 0;
+    translate: 0 var(--fork-toast-drop);
+    scale: 0.98;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+    scale: none;
+  }
+}
+
+@keyframes fork-effort-tiles-clear {
+  0%,
+  92% {
+    opacity: 1;
+    visibility: visible;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes fork-effort-tile-fill {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  26% {
+    background-color: var(--fork-effort-color);
+  }
+  52% {
+    background-color: color-mix(in srgb, var(--fork-effort-color) 18%, transparent);
+  }
+}
+
+@keyframes fork-effort-edge-ripple {
+  0%,
+  12%,
+  26%,
+  40%,
+  54%,
+  68%,
+  82% {
+    opacity: 0.3;
+    box-shadow: inset 0 0 4px 0 transparent;
+  }
+  19%,
+  47%,
+  75% {
+    opacity: 0.85;
+    box-shadow: inset 0 0 12px 1px color-mix(in srgb, var(--fork-effort-color) 55%, transparent);
+  }
+  100% {
+    opacity: 0;
+    box-shadow: inset 0 0 4px 0 transparent;
+  }
+}
+
+@keyframes fork-shimmer-text {
+  from {
+    background-position: 100% center;
+  }
+  to {
+    background-position: 0% center;
+  }
+}
+
+@keyframes fork-thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes fork-pixel-bob {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-0.75px);
+  }
+}
+
+@keyframes fork-pixel-frame-a {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes fork-pixel-frame-b {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes fork-pixel-eyes-open {
+  0% {
+    opacity: 1;
+  }
+  96% {
+    opacity: 0;
+  }
+  98.5% {
+    opacity: 1;
+  }
+}
+
+@keyframes fork-pixel-eyes-closed {
+  0% {
+    opacity: 0;
+  }
+  96% {
+    opacity: 1;
+  }
+  98.5% {
+    opacity: 0;
+  }
+}
