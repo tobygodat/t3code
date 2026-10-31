@@ -12,6 +12,7 @@ import { AtomRegistry } from "effect/reactivity";
 import * as Stream from "effect/Stream";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
+import { claudeArtifactOpenFor } from "../../browser/claudeArtifactLinks";
 import { openFileInPreview, openUrlInPreview } from "../../browser/openFileInPreview";
 import { useBrowserPanelThread } from "../../browser/useBrowserPanelThread";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -122,11 +123,14 @@ export function DesktopWebLinkCoordinator() {
       reportFailure(url);
       return;
     }
-    // HTML files are served by this machine's environment, so only its threads can take them.
-    const threadRef = await panelThread(
-      url,
-      isFile ? (primaryEnvironment?.environmentId ?? null) : null,
-    );
+    const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
+    // HTML files are served by this machine's environment, and claude.ai docs open with the
+    // sign-in only its tabs hold, so only its threads can take them.
+    const primaryOnly =
+      isFile ||
+      (primaryEnvironmentId !== null &&
+        "runtime" in claudeArtifactOpenFor(url, primaryEnvironmentId));
+    const threadRef = await panelThread(url, primaryOnly ? primaryEnvironmentId : null);
     if (threadRef === null) return;
     const result = isFile
       ? httpBaseUrl === null
@@ -139,7 +143,12 @@ export function DesktopWebLinkCoordinator() {
             createAssetUrl,
             openPreview,
           })
-      : await openUrlInPreview({ threadRef, url, openPreview });
+      : await openUrlInPreview({
+          threadRef,
+          url,
+          openPreview,
+          ...claudeArtifactOpenFor(url, threadRef.environmentId),
+        });
     if (result === null) {
       reportFailure(url);
       return;

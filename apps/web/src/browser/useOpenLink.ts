@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { recordVisitForThread } from "~/browserHistoryStore";
+import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { readLocalApi } from "~/localApi";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -43,11 +44,12 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
         : false,
     });
     if (target === "app" && targetThreadRef) {
+      const claudeOpen = claudeArtifactOpenFor(url, targetThreadRef.environmentId);
       const result = await openUrlInPreview({
         threadRef: targetThreadRef,
         url,
         openPreview,
-        ...claudeArtifactOpenFor(url, targetThreadRef.environmentId),
+        ...claudeOpen,
       });
       if (isAtomCommandInterrupted(result)) return;
       if (result._tag === "Success") {
@@ -56,6 +58,17 @@ export function useOpenLink(threadRef: ScopedThreadRef | null | undefined): (
       }
       const failure = squashAtomCommandFailure(result);
       if (failure instanceof BrowserSettingsReadError) throw failure;
+      // The system browser lacks the panel's claude.ai sign-in, so a forced open stops here.
+      if ("runtime" in claudeOpen) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not open the claude.ai doc",
+            description: failure instanceof Error ? failure.message : url,
+          }),
+        );
+        return;
+      }
       console.error(result.cause);
     }
     const api = readLocalApi();
