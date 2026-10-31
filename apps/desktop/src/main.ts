@@ -86,6 +86,11 @@ if (process.argv.includes("--version")) {
   Electron.app.exit(0);
 }
 
+// Electron names the macOS safeStorage keychain item after the app name it has once this script
+// has loaded, before the async startup renames the app. A relabelled build needs its own item.
+const stageLabelOverride = process.env.T3CODE_DESKTOP_STAGE_LABEL?.trim();
+if (stageLabelOverride) Electron.app.setName(`T3 Code ${stageLabelOverride}`);
+
 const layerDesktopEnvironment = Layer.unwrap(
   Effect.gen(function* () {
     const metadata = yield* Effect.service(ElectronApp.ElectronApp).pipe(
