@@ -1,4 +1,4 @@
-{"type":"system","subtype":"init"}
+{"type":"system","subtype":"init","tools":["Edit","NotebookEdit","Skill","ToolSearch","WebFetch","WebSearch","Write"]}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_015W5UWitgnC7gwviTaZTGdd","name":"ToolSearch","input":{"query":"select:mcp__claude_ai_Claude_Docs__read,mcp__claude_ai_Claude_Docs__export","max_results":2},"caller":{"type":"direct"}}]},"parent_tool_use_id":null}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_015W5UWitgnC7gwviTaZTGdd","content":[{"type":"tool_reference","tool_name":"mcp__claude_ai_Claude_Docs__read"},{"type":"tool_reference","tool_name":"mcp__claude_ai_Claude_Docs__export"}]}]},"parent_tool_use_id":null}
 {"type":"assistant","message":{"role":"assistant","content":[]},"parent_tool_use_id":null}

@@ -1,4 +1,4 @@
-{"type":"system","subtype":"init"}
+{"type":"system","subtype":"init","tools":["Edit","NotebookEdit","Skill","ToolSearch","WebFetch","WebSearch","Write"]}
 {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01135hpcqDjT21YoWmcJQgiz","name":"ToolSearch","input":{"query":"select:mcp__claude_ai_Claude_Docs__guide,mcp__claude_ai_Claude_Docs__read,mcp__claude_ai_Claude_Docs__update","max_results":3},"caller":{"type":"direct"}}]},"parent_tool_use_id":null}
 {"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01135hpcqDjT21YoWmcJQgiz","content":[{"type":"tool_reference","tool_name":"mcp__claude_ai_Claude_Docs__read"}]}]},"parent_tool_use_id":null}
 {"type":"user","message":{"role":"user","content":[{"type":"text","text":"Being added to this conversation: mcp__claude_ai_Claude_Docs__guide, mcp__claude_ai_Claude_Docs__update. The announcement after this result says how to call them."}]},"parent_tool_use_id":null}

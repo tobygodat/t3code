@@ -15,7 +15,10 @@ import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -27,8 +30,12 @@ const DOCS_TOOL_PREFIX = "mcp__claude_ai_Claude_Docs__";
 const MODEL =
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")] ?? "haiku";
 const MAX_READ_CHARS = 60_000;
-const MAX_STDOUT_CHARS = 16_000_000;
+const MAX_STDOUT_BYTES = 16_000_000;
+const MAX_STDERR_BYTES = 64_000;
 const MAX_DETAIL_CHARS = 500;
+// A tab at MAX_READ_CHARS exports as ~80k base64 chars, under 100k tokens even at one char per
+// token; the CLI's default of 25k tokens cuts that export off.
+const MAX_MCP_OUTPUT_TOKENS = "100000";
 
 type DocsTool = "guide" | "read" | "export" | "batch" | "update";
 
@@ -40,16 +47,67 @@ interface Plan {
 /** The Docs tools each operation may call. Reads get read-only tools; edits never create or delete. */
 export const PLANS = {
   read: { tools: ["read", "export"], timeout: Duration.seconds(60) },
-  create: { tools: ["batch"], timeout: Duration.seconds(120) },
+  create: { tools: ["batch"], timeout: Duration.seconds(180) },
   edit: { tools: ["guide", "read", "update"], timeout: Duration.seconds(90) },
 } as const satisfies Record<string, Plan>;
 
 /**
- * Measured on claude 2.1.312. `--tools`, `--strict-mcp-config`, `--bare` and
- * ENABLE_CLAUDEAI_MCP_SERVERS=false each break the claude.ai connector or tool calling.
- * dontAsk still runs Bash and Agent, so they are disallowed by name.
+ * Measured on claude 2.1.314: dontAsk still runs these tools (Read inside the cwd, MCP resources,
+ * crons), so they are disallowed by name. Disallowing the permission-gated tools as well, or passing
+ * `--tools`, `--strict-mcp-config`, `--bare` or ENABLE_CLAUDEAI_MCP_SERVERS=false, breaks tool calls.
  */
-const claudeDocsArgs = (plan: Plan): ReadonlyArray<string> => [
+const DISALLOWED_TOOLS = [
+  "Agent",
+  "Task",
+  "TaskOutput",
+  "TaskStop",
+  "Bash",
+  "BashOutput",
+  "KillShell",
+  "PowerShell",
+  "Read",
+  "Glob",
+  "Grep",
+  "LS",
+  "LSP",
+  "NotebookRead",
+  "ListMcpResourcesTool",
+  "ReadMcpResourceTool",
+  "CronCreate",
+  "CronDelete",
+  "CronList",
+  "Monitor",
+  "ListAgents",
+  "SendMessage",
+  "SendToProject",
+  "SendToProjectContext",
+  "RemoteTrigger",
+  "ScheduleWakeup",
+  "PushNotification",
+  "Workflow",
+  "DesignSync",
+  "EnterWorktree",
+  "ExitWorktree",
+  "ReportFindings",
+  "TodoWrite",
+  "AskUserQuestion",
+  "ExitPlanMode",
+  "EnterPlanMode",
+  "SlashCommand",
+];
+
+/** Built-in tools a run may load: each needs permission, which dontAsk denies outside the plan. */
+const GATED_TOOLS: ReadonlySet<string> = new Set([
+  "ToolSearch",
+  "Edit",
+  "NotebookEdit",
+  "Skill",
+  "WebFetch",
+  "WebSearch",
+  "Write",
+]);
+
+export const claudeDocsArgs = (plan: Plan): ReadonlyArray<string> => [
   "-p",
   "--model",
   MODEL,
@@ -60,7 +118,7 @@ const claudeDocsArgs = (plan: Plan): ReadonlyArray<string> => [
   "--setting-sources",
   "",
   "--disallowedTools",
-  "Bash,Agent,Task,PowerShell",
+  DISALLOWED_TOOLS.join(","),
   "--allowedTools",
   ["ToolSearch", ...plan.tools.map((tool) => `${DOCS_TOOL_PREFIX}${tool}`)].join(","),
   "--permission-mode",
@@ -69,6 +127,24 @@ const claudeDocsArgs = (plan: Plan): ReadonlyArray<string> => [
   JSON.stringify({ disableAllHooks: true }),
   "--disable-slash-commands",
 ];
+
+const InitLine = Schema.Struct({
+  type: Schema.Literal("system"),
+  subtype: Schema.Literal("init"),
+  tools: Schema.optional(Schema.Array(Schema.String)),
+});
+const decodeInitLine = Schema.decodeUnknownOption(Schema.fromJsonString(InitLine));
+
+/**
+ * The built-in tools an init line loads outside GATED_TOOLS, or undefined for any other line.
+ * A newer CLI may add a tool dontAsk runs; an init with no tool list fails closed the same way.
+ */
+function ungatedTools(line: string): ReadonlyArray<string> | undefined {
+  const init = Option.getOrUndefined(decodeInitLine(line));
+  if (init === undefined) return undefined;
+  if (init.tools === undefined) return ["(no tool list)"];
+  return init.tools.filter((name) => !name.startsWith("mcp__") && !GATED_TOOLS.has(name));
+}
 
 interface DocsCall {
   readonly tool: DocsTool;
@@ -79,8 +155,12 @@ interface DocsCall {
 
 export interface DocsTranscript {
   readonly calls: ReadonlyArray<DocsCall>;
-  /** Tools called outside the plan. Any one fails the run. */
+  /** Tools called outside the plan. */
   readonly strayTools: ReadonlyArray<string>;
+  /** Built-in tools the CLI loaded that dontAsk would not deny. */
+  readonly ungatedTools: ReadonlyArray<string>;
+  /** The CLI reached its final result, so every call it made is in `calls`. */
+  readonly finished: boolean;
   /** The CLI's own error result, such as an expired login or a usage limit. */
   readonly cliError: string | undefined;
 }
@@ -125,11 +205,18 @@ export function collectConnectorCalls(
   const calls: Array<{ tool: DocsTool; input: unknown; result: DocsCall["result"] }> = [];
   const callsById = new Map<string, (typeof calls)[number]>();
   const strayTools: Array<string> = [];
+  let ungated: ReadonlyArray<string> | undefined;
+  let finished = false;
   let cliError: string | undefined;
   for (const line of lines) {
+    if (ungated === undefined) {
+      ungated = ungatedTools(line);
+      if (ungated !== undefined) continue;
+    }
     const decoded = Option.getOrUndefined(decodeStreamLine(line));
     if (decoded === undefined) continue;
     if (decoded.type === "result") {
+      finished = true;
       if (decoded.is_error === true) cliError = decoded.result ?? "Claude CLI reported an error.";
       continue;
     }
@@ -160,7 +247,7 @@ export function collectConnectorCalls(
       }
     }
   }
-  return { calls, strayTools, cliError };
+  return { calls, strayTools, ungatedTools: ungated ?? [], finished, cliError };
 }
 
 const Frame = Schema.optional(
@@ -192,7 +279,7 @@ const ExportInput = Schema.Struct({
   file: Schema.String,
   format: Schema.Literal("markdown"),
 });
-const UpdateInput = Schema.Struct({
+const DocRefInput = Schema.Struct({
   ref: Schema.Struct({ object: Schema.String, id: Schema.String }),
   container: Schema.optional(Schema.Struct({ id: Schema.String })),
 });
@@ -245,13 +332,15 @@ function refusal(deny: typeof Deny.Type): ClaudeArtifactsError {
   );
 }
 
-function strayFailure(transcript: DocsTranscript): ClaudeArtifactsError | undefined {
-  return transcript.strayTools.length === 0
-    ? undefined
-    : fail(
-        "run_failed",
-        `Claude called tools outside its plan: ${transcript.strayTools.join(", ")}.`,
-      );
+/** Why the run left its lockdown or its plan, or undefined when it stayed inside both. */
+function offPlan(transcript: DocsTranscript): string | undefined {
+  if (transcript.ungatedTools.length > 0) {
+    return `The Claude CLI loaded tools T3 Code cannot lock down: ${transcript.ungatedTools.join(", ")}.`;
+  }
+  if (transcript.strayTools.length > 0) {
+    return `Claude called tools outside its plan: ${transcript.strayTools.join(", ")}.`;
+  }
+  return undefined;
 }
 
 const noDocsTools = () =>
@@ -272,6 +361,19 @@ function projectRead(id: ClaudeArtifactId, transcript: DocsTranscript): ProjectR
   return call === undefined ? undefined : { call, value: decodeAs(ReadAllow)(verdict(call)) };
 }
 
+/** Every id the doc answers to: the one asked for, its UUID slug, and the id in its link. */
+function docIdsOf(id: ClaudeArtifactId, read: ProjectRead | undefined): ReadonlySet<string> {
+  const frame = read?.value?.frame;
+  const linked = frame?.url === undefined ? null : parseClaudeArtifactUrl(frame.url);
+  return new Set([id, frame?.slug ?? id, linked ?? id]);
+}
+
+/** The doc a read or update addresses: its container, or the ref when the ref is the doc. */
+function targetDoc(call: DocsCall): string | undefined {
+  const input = decodeAs(DocRefInput)(call.input);
+  return input?.container?.id ?? (input?.ref.object === "project" ? input.ref.id : undefined);
+}
+
 function readDenial(read: ProjectRead): ClaudeArtifactsError | undefined {
   const deny = denial(read.call);
   if (deny === undefined) return undefined;
@@ -287,8 +389,8 @@ export function interpretRead(
   id: ClaudeArtifactId,
   transcript: DocsTranscript,
 ): ClaudeArtifactReadResult | ClaudeArtifactsError {
-  const stray = strayFailure(transcript);
-  if (stray) return stray;
+  const stray = offPlan(transcript);
+  if (stray) return fail("run_failed", stray);
   const read = projectRead(id, transcript);
   if (read === undefined) {
     return transcript.calls.length === 0
@@ -298,7 +400,7 @@ export function interpretRead(
   const denied = readDenial(read);
   if (denied) return denied;
   if (read.value === undefined) return fail("run_failed", "claude.ai returned an unreadable doc.");
-  const docIds = new Set([id, read.value.frame?.slug]);
+  const docIds = docIdsOf(id, read);
   let budget = MAX_READ_CHARS;
   const tabs: Array<ClaudeArtifactReadResult["tabs"][number]> = [];
   for (const file of read.value.files) {
@@ -341,34 +443,49 @@ function createdUrl(call: DocsCall): string | undefined {
   return slug === null ? undefined : claudeArtifactUrl(slug);
 }
 
+/** The write outcome is decided first, so a landed doc's link survives every later problem. */
 export function interpretCreate(
   sent: ReturnType<typeof createBatchInput>,
   transcript: DocsTranscript,
 ): ClaudeArtifactWriteResult | ClaudeArtifactsError {
-  const stray = strayFailure(transcript);
-  if (stray) return stray;
   const batches = transcript.calls.filter((call) => call.tool === "batch");
-  if (batches.length === 0) return noDocsTools();
   const landed = batches.filter(allowed);
-  const first = landed[0];
-  if (first === undefined) {
-    const lost = batches.some((call) => call.result === undefined);
-    const deny = batches.map(denial).findLast((entry) => entry !== undefined);
-    if (lost || deny === undefined) {
-      return fail(
-        "outcome_unknown",
-        "The create call was sent but its result was lost. Check claude.ai before trying again.",
-      );
-    }
-    return refusal(deny);
+  const urls = landed.map(createdUrl).filter(Predicate.isNotUndefined);
+  const url = urls[0];
+  if (landed.length > 1) {
+    const others = urls.length > 1 ? ` The others: ${urls.slice(1).join(", ")}.` : "";
+    return fail(
+      "altered",
+      `Claude created ${landed.length} docs instead of one.${others} Delete the extras on claude.ai.`,
+      url,
+    );
   }
-  const url = createdUrl(first);
+  if (batches.some((call) => call.result === undefined)) {
+    return fail(
+      "outcome_unknown",
+      url === undefined
+        ? "The create call was sent but its result was lost. Check claude.ai before trying again."
+        : "This doc was created, but another create call's result was lost. Check claude.ai before trying again.",
+      url,
+    );
+  }
+  const stray = offPlan(transcript);
+  const [first] = landed;
+  if (first === undefined) {
+    if (stray) return fail("run_failed", stray);
+    if (batches.length === 0) return noDocsTools();
+    const deny = batches.map(denial).findLast(Predicate.isNotUndefined);
+    return deny === undefined
+      ? fail(
+          "outcome_unknown",
+          "claude.ai returned an unreadable create result. Check claude.ai before trying again.",
+        )
+      : refusal(deny);
+  }
   if (url === undefined) {
     return fail("outcome_unknown", "claude.ai accepted the create but returned no link.");
   }
-  if (landed.length > 1) {
-    return fail("altered", `Claude created ${landed.length} docs instead of one.`, url);
-  }
+  if (stray) return fail("altered", `The doc was created. ${stray}`, url);
   const input = decodeAs(CreateInput)(first.input);
   if (
     input === undefined ||
@@ -385,47 +502,74 @@ export function interpretCreate(
   return { url };
 }
 
+/** Any allowed update on the doc has landed, whatever later calls did, so its link is kept. */
 export function interpretEdit(
   id: ClaudeArtifactId,
   transcript: DocsTranscript,
 ): ClaudeArtifactWriteResult | ClaudeArtifactsError {
-  const stray = strayFailure(transcript);
-  if (stray) return stray;
   const read = projectRead(id, transcript);
-  const docIds = new Set<string>([id, ...(read?.value?.frame?.slug ?? [])]);
+  const docIds = docIdsOf(id, read);
+  const url = read?.value?.frame?.url ?? claudeArtifactUrl(id);
   const updates = transcript.calls.filter((call) => call.tool === "update");
-  const offTarget = updates
-    .map((call) => {
-      const input = decodeAs(UpdateInput)(call.input);
-      return input?.container?.id ?? (input?.ref.object === "project" ? input.ref.id : undefined);
-    })
-    .filter((target) => target === undefined || !docIds.has(target));
+  const onDoc = updates.filter((call) => docIds.has(targetDoc(call) ?? ""));
+  const elsewhere = updates.filter((call) => !onDoc.includes(call));
+  const landed = onDoc.some(allowed);
+  const landedUrl = landed ? url : undefined;
+  const editedElsewhere = elsewhere.filter(allowed).map((call) => targetDoc(call) ?? "no doc");
+  if (editedElsewhere.length > 0) {
+    return fail(
+      "altered",
+      `Claude edited another doc (${[...new Set(editedElsewhere)].join(", ")}). Check it on claude.ai.`,
+      landedUrl,
+    );
+  }
+  if (updates.some((call) => call.result === undefined)) {
+    return fail(
+      "outcome_unknown",
+      landed
+        ? "The edit landed, but another edit call's result was lost. Read the doc before trying again."
+        : "The edit was sent but its result was lost. Read the doc before trying again.",
+      landedUrl,
+    );
+  }
+  // A doc can pull in another doc's text, so reading one is off target too.
+  const offTarget = [
+    ...new Set([
+      ...elsewhere.map((call) => targetDoc(call) ?? "no doc"),
+      ...transcript.calls
+        .filter((call) => call.tool === "read")
+        .map(targetDoc)
+        .filter((target) => target !== undefined && !docIds.has(target)),
+    ]),
+  ];
+  const stray = offPlan(transcript);
+  if (landed) {
+    if (offTarget.length > 0) {
+      return fail(
+        "altered",
+        `The edit landed, but Claude also reached other docs (${offTarget.join(", ")}). Check the doc.`,
+        url,
+      );
+    }
+    return stray ? fail("altered", `The edit landed. ${stray}`, url) : { url };
+  }
+  if (stray) return fail("run_failed", stray);
   if (offTarget.length > 0) {
     return fail(
       "refused",
-      `Claude aimed an edit outside this doc (${offTarget.map((target) => target ?? "no doc").join(", ")}). Check that doc on claude.ai.`,
+      `Claude aimed outside this doc (${offTarget.join(", ")}). Check that doc on claude.ai.`,
     );
   }
-  const last = updates.at(-1);
-  if (last === undefined) {
-    if (read !== undefined) {
-      const denied = readDenial(read);
-      if (denied) return denied;
-    }
-    return transcript.calls.length === 0
-      ? noDocsTools()
-      : fail("nothing_changed", "Claude made no change to the doc.");
-  }
-  if (last.result === undefined) {
-    return fail(
-      "outcome_unknown",
-      "The edit was sent but its result was lost. Read the doc before trying again.",
-    );
-  }
-  const deny = denial(last);
+  const deny = onDoc.map(denial).findLast(Predicate.isNotUndefined);
   if (deny) return refusal(deny);
-  if (!allowed(last)) return fail("run_failed", "claude.ai returned an unreadable edit result.");
-  return { url: read?.value?.frame?.url ?? claudeArtifactUrl(id) };
+  if (onDoc.length > 0) return fail("run_failed", "claude.ai returned an unreadable edit result.");
+  if (read !== undefined) {
+    const denied = readDenial(read);
+    if (denied) return denied;
+  }
+  return transcript.calls.length === 0
+    ? noDocsTools()
+    : fail("nothing_changed", "Claude made no change to the doc.");
 }
 
 const PREAMBLE =
@@ -474,14 +618,30 @@ interface RunOutcome {
 
 const isClaudeArtifactsError = Schema.is(ClaudeArtifactsError);
 
-/** A partial run that left no stronger verdict reports why the process failed. */
-function settle<A>(
+/**
+ * A partial run that left no stronger verdict reports why the process failed. A write the
+ * interpreter accepted from a cut-off stream stays unknown: a later call may have gone unseen.
+ */
+function settle<A extends { readonly url: string }>(
   outcome: RunOutcome,
   interpreted: A | ClaudeArtifactsError,
-  cliError: string | undefined,
+  transcript: DocsTranscript,
+  mutates: boolean,
 ): Effect.Effect<A, ClaudeArtifactsError> {
-  if (!isClaudeArtifactsError(interpreted)) return Effect.succeed(interpreted);
-  const failure = cliError ?? outcome.failure;
+  if (!isClaudeArtifactsError(interpreted)) {
+    return mutates && outcome.failure !== undefined && !transcript.finished
+      ? Effect.fail(
+          fail(
+            "outcome_unknown",
+            bounded(
+              `The change landed, but the Claude CLI run was cut off: ${outcome.failure} Read the doc before trying again.`,
+            ),
+            interpreted.url,
+          ),
+        )
+      : Effect.succeed(interpreted);
+  }
+  const failure = transcript.cliError ?? outcome.failure;
   const weak =
     interpreted.reason === "connector_missing" ||
     interpreted.reason === "run_failed" ||
@@ -493,28 +653,54 @@ function settle<A>(
   );
 }
 
+/** Stops a run mid-stream; closing the stream's scope kills the process. */
+class ClaudeDocsRunStopped extends Schema.TaggedError<ClaudeDocsRunStopped>()(
+  "ClaudeDocsRunStopped",
+  { reason: Schema.String },
+) {}
+
+const capBytes =
+  (max: number, reason: string) =>
+  <E, R>(stream: Stream.Stream<Uint8Array, E, R>) => {
+    let bytes = 0;
+    return stream.pipe(
+      Stream.tap((chunk) => {
+        bytes += chunk.byteLength;
+        return bytes > max ? Effect.fail(new ClaudeDocsRunStopped({ reason })) : Effect.void;
+      }),
+    );
+  };
+
 export const makeClaudeDocs = Effect.fn("makeClaudeDocs")(function* (
-  settings: ClaudeSettings,
+  settings: Pick<ClaudeSettings, "binaryPath" | "homePath">,
   environment: NodeJS.ProcessEnv,
-  cwd: string,
+  stateDir: string,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const claudeEnvironment = yield* makeClaudeEnvironment(settings, environment);
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const runEnvironment = {
+    ...(yield* makeClaudeEnvironment(settings, environment)),
+    MAX_MCP_OUTPUT_TOKENS,
+  };
+  // Kept empty: dontAsk lets built-in reads into the cwd, and stateDir holds secrets.
+  const cwd = path.join(stateDir, "claude-docs");
   // Each run is a full CLI process; a burst of agent calls must not flood the host.
   const runs = yield* Semaphore.make(2);
 
   const run = Effect.fn("ClaudeDocs.run")(function* (plan: Plan, prompt: string) {
     const lines: Array<string> = [];
-    let stdoutChars = 0;
+    let initChecked = false;
     const spawnCommand = yield* resolveSpawnCommand(
       settings.binaryPath || "claude",
       claudeDocsArgs(plan),
-      { env: claudeEnvironment },
+      { env: runEnvironment },
     );
     const runProcess = Effect.gen(function* () {
+      yield* fileSystem.makeDirectory(cwd, { recursive: true });
       const child = yield* spawner.spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-          env: claudeEnvironment,
+          env: runEnvironment,
           cwd,
           shell: spawnCommand.shell,
           stdin: { stream: Stream.encodeText(Stream.make(prompt)) },
@@ -524,25 +710,38 @@ export const makeClaudeDocs = Effect.fn("makeClaudeDocs")(function* (
       const [, stderr, exitCode] = yield* Effect.all(
         [
           child.stdout.pipe(
+            capBytes(MAX_STDOUT_BYTES, "its output was too large."),
             Stream.decodeText(),
             Stream.splitLines,
-            Stream.runForEach((line) =>
-              Effect.sync(() => {
-                stdoutChars += line.length;
-                if (stdoutChars <= MAX_STDOUT_CHARS) lines.push(line);
-              }),
-            ),
+            Stream.runForEach((line) => {
+              lines.push(line);
+              if (initChecked) return Effect.void;
+              const ungated = ungatedTools(line);
+              if (ungated === undefined) return Effect.void;
+              initChecked = true;
+              return ungated.length === 0
+                ? Effect.void
+                : Effect.fail(
+                    new ClaudeDocsRunStopped({
+                      reason: `it loaded tools T3 Code cannot lock down: ${ungated.join(", ")}.`,
+                    }),
+                  );
+            }),
           ),
-          child.stderr.pipe(Stream.decodeText(), Stream.mkString),
+          child.stderr.pipe(
+            capBytes(MAX_STDERR_BYTES, "its error output was too large."),
+            Stream.decodeText(),
+            Stream.mkString,
+          ),
           child.exitCode,
         ],
         { concurrency: "unbounded" },
       );
-      if (stdoutChars > MAX_STDOUT_CHARS) return "its output was too large.";
       return exitCode === 0 ? undefined : stderr.trim() || `exit code ${exitCode}.`;
     }).pipe(Effect.scoped, Effect.timeoutOption(plan.timeout));
     const failure = yield* runProcess.pipe(
       Effect.map(Option.getOrElse(() => "it timed out.")),
+      Effect.catchTags({ ClaudeDocsRunStopped: (stopped) => Effect.succeed(stopped.reason) }),
       Effect.catch((cause) => Effect.succeed(`it could not start (${String(cause)}).`)),
     );
     return { lines, failure } satisfies RunOutcome;
@@ -551,7 +750,7 @@ export const makeClaudeDocs = Effect.fn("makeClaudeDocs")(function* (
   const read = Effect.fn("ClaudeDocs.read")(function* (id: ClaudeArtifactId) {
     const outcome = yield* run(PLANS.read, readPrompt(id));
     const transcript = collectConnectorCalls(outcome.lines, PLANS.read);
-    return yield* settle(outcome, interpretRead(id, transcript), transcript.cliError);
+    return yield* settle(outcome, interpretRead(id, transcript), transcript, false);
   });
 
   const write = Effect.fn("ClaudeDocs.write")(function* (request: ClaudeArtifactWrite) {
@@ -559,11 +758,11 @@ export const makeClaudeDocs = Effect.fn("makeClaudeDocs")(function* (
       const sent = createBatchInput(request.title, request.markdown);
       const outcome = yield* run(PLANS.create, createPrompt(sent));
       const transcript = collectConnectorCalls(outcome.lines, PLANS.create);
-      return yield* settle(outcome, interpretCreate(sent, transcript), transcript.cliError);
+      return yield* settle(outcome, interpretCreate(sent, transcript), transcript, true);
     }
     const outcome = yield* run(PLANS.edit, editPrompt(request.artifact, request.instruction));
     const transcript = collectConnectorCalls(outcome.lines, PLANS.edit);
-    return yield* settle(outcome, interpretEdit(request.artifact, transcript), transcript.cliError);
+    return yield* settle(outcome, interpretEdit(request.artifact, transcript), transcript, true);
   });
 
   return { read, write } satisfies NonNullable<ProviderInstance["claudeDocs"]>;
