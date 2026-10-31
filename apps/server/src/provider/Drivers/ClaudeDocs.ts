@@ -318,9 +318,6 @@ const DocRefInput = Schema.Struct({
   ref: Schema.optional(Schema.Struct({ object: Schema.String, id: Schema.String })),
   container: Schema.optional(Schema.Struct({ id: Schema.String })),
 });
-const UpdateInput = Schema.Struct({
-  payload: Schema.Struct({ ops: Schema.Array(Schema.Unknown) }),
-});
 const BirthInput = Schema.Struct({
   container: Schema.Struct({ create: Schema.Struct({}) }),
 });
@@ -418,29 +415,6 @@ function docIdsOf(id: ClaudeArtifactId, read: ProjectRead | undefined): Readonly
   const linked = frame?.url === undefined ? null : parseClaudeArtifactUrl(frame.url);
   return new Set([id, frame?.slug ?? id, linked ?? id]);
 }
-
-/** Ops minus their guards, with block ids cut to the `.clock` a read prints. */
-function resendable(value: unknown, key?: string): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) =>
-      key === "ids" && typeof item === "string"
-        ? item.replace(/^\w*(\.\d+)$/, "$1")
-        : resendable(item),
-    );
-  }
-  if (typeof value !== "object" || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([name]) => name !== "ifHash" && name !== "ifRev")
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, item]) => [name, resendable(item, name)]),
-  );
-}
-
-const resendKey = (call: DocsCall) => {
-  const ops = decodeAs(UpdateInput)(call.input)?.payload.ops;
-  return ops === undefined ? undefined : JSON.stringify(resendable(ops));
-};
 
 /** The doc a call addresses: its container, or the ref when the ref is the doc. */
 function targetDoc(call: DocsCall): string {
@@ -615,8 +589,7 @@ export function interpretCreate(
 /**
  * Every update is classified first. A landed update on the doc keeps its link whatever else
  * happened. Any refusal on the doc means part of the change did not land, except a guard mismatch
- * that a later landed update retried, or a malformed call (atomic, so nothing landed) that the
- * next update resent unchanged but for full ids or fresh guards, and landed.
+ * that a later landed update retried.
  */
 export function interpretEdit(
   id: ClaudeArtifactId,
@@ -632,17 +605,6 @@ export function interpretEdit(
   const elsewhere = updates.filter((update) => !docIds.has(update.doc));
   const lastLanded = onDoc.findLastIndex((update) => update.ack === "allowed");
   const landed = lastLanded >= 0;
-  const retried = (call: DocsCall, deny: typeof Deny.Type, index: number) => {
-    if (deny.reason === "guard_mismatch") return index < lastLanded;
-    const next = onDoc[index + 1];
-    const ops = resendKey(call);
-    return (
-      deny.reason === "bad_request" &&
-      next?.ack === "allowed" &&
-      ops !== undefined &&
-      ops === resendKey(next.call)
-    );
-  };
   const unresolved = updates.filter((update) => update.ack === "unknown").length;
   const editedElsewhere = unique(
     elsewhere.filter((update) => update.ack === "allowed").map((update) => update.doc),
@@ -657,7 +619,9 @@ export function interpretEdit(
       ? onDoc
           .flatMap((update, index) => {
             const deny = denial(update.call);
-            return deny === undefined || retried(update.call, deny, index) ? [] : [deny];
+            return deny === undefined || (deny.reason === "guard_mismatch" && index < lastLanded)
+              ? []
+              : [deny];
           })
           .at(-1)
       : undefined;

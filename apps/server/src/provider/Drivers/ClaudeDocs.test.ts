@@ -70,22 +70,10 @@ const readOther = [
   toolResult("r9", '{"verdict":"allow","value":{"name":"Other"},"files":[]}'),
 ];
 
-const insertAfter = (id: string, content: string) => ({
-  op: "insert",
-  target: { kind: "blocks", ids: [id] },
-  side: "after",
-  source: { as: "markdown", from: { kind: "inline", content } },
-});
-
-const update = (
-  id: string,
-  doc: string,
-  ops: ReadonlyArray<object> = [insertAfter("m5g6zynxvay.427", "More.")],
-) =>
+const update = (id: string, doc: string) =>
   toolUse(id, "mcp__claude_ai_Claude_Docs__update", {
     ref: { object: "node", id: "n1" },
     container: { kind: "project", id: doc },
-    payload: { ops },
   });
 
 /** An error carries a url too, so a success row must match exactly. */
@@ -286,14 +274,14 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
   });
 
   describe("interpretEdit", () => {
-    const RELATIVE_ID =
-      '{"verdict":"deny","reason":"bad_request","hint":"ops[0].target.ids[0] is relative_id"}';
-    const denyUpdate =
-      (deny = '{"verdict":"deny","reason":"guard_mismatch","hint":"that block changed"}') =>
-      (line: string) =>
-        isResultFor(EDIT_UPDATE_ID)(line)
-          ? toolResult(EDIT_UPDATE_ID, `${deny}\nsupport: req_test`, true)
-          : line;
+    const denyUpdate = (line: string) =>
+      isResultFor(EDIT_UPDATE_ID)(line)
+        ? toolResult(
+            EDIT_UPDATE_ID,
+            '{"verdict":"deny","reason":"guard_mismatch","hint":"that block changed"}\nsupport: req_test',
+            true,
+          )
+        : line;
     const cases: ReadonlyArray<
       readonly [
         name: string,
@@ -329,42 +317,18 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
         "a guard mismatch retried until it landed",
         DOC,
         (edit) => [
-          ...edit.map(denyUpdate()),
+          ...edit.map(denyUpdate),
           update("t9", DOC),
           toolResult("t9", '{"verdict":"allow","rev":5}'),
         ],
         { url: DOC_URL },
       ],
       [
-        "a short id resent in full until it landed",
-        DOC,
-        (edit) => [
-          ...edit,
-          update("t9", DOC, [{ ...insertAfter(".16", "More."), ifRev: 4 }]),
-          toolResult("t9", RELATIVE_ID, true),
-          update("t10", DOC, [{ ...insertAfter("m5g6zynxvay.16", "More."), ifRev: 5 }]),
-          toolResult("t10", '{"verdict":"allow","rev":6}'),
-        ],
-        { url: DOC_URL },
-      ],
-      [
-        "a malformed update followed by a different landed one",
-        DOC,
-        (edit) => [
-          ...edit,
-          update("t9", DOC, [insertAfter(".16", "More.")]),
-          toolResult("t9", RELATIVE_ID, true),
-          update("t10", DOC, [insertAfter("m5g6zynxvay.20", "Other.")]),
-          toolResult("t10", '{"verdict":"allow","rev":6}'),
-        ],
-        { reason: "altered", url: DOC_URL, message: expect.stringContaining("bad_request") },
-      ],
-      [
         "a refused update between two landed ones",
         DOC,
         (edit) => [
           ...edit,
-          update("t9", DOC, [{ op: "delete", target: { kind: "find", text: " stale" } }]),
+          update("t9", DOC),
           toolResult("t9", '{"verdict":"deny","reason":"bad_request","detail":"op:unknown"}', true),
           update("t10", DOC),
           toolResult("t10", '{"verdict":"allow","rev":6}'),
@@ -434,7 +398,7 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       [
         "a read of another doc with no edit",
         DOC,
-        (edit) => [...edit.map(denyUpdate()), ...readOther],
+        (edit) => [...edit.map(denyUpdate), ...readOther],
         { reason: "refused", message: expect.stringContaining(OTHER_DOC) },
       ],
       [
@@ -451,7 +415,7 @@ it.layer(NodeServices.layer)("ClaudeDocs", (it) => {
       [
         "a denied update",
         DOC,
-        (edit) => edit.map(denyUpdate()),
+        (edit) => edit.map(denyUpdate),
         {
           reason: "refused",
           message: "claude.ai refused the call (guard_mismatch): that block changed",
