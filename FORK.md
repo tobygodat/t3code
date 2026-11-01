@@ -55,13 +55,13 @@ T3_FORK_REPO=/Users/tobygodat/t3code sh <(git -C /Users/tobygodat/t3code show or
 
 ### Updating from the app
 
-T3 Code Fork checks for a new build 15 seconds after it starts and every 4 minutes after that. A check fetches `origin/main` in the checkout named in `fork-release.json`. When `origin/main` is ahead of the app's commit, the sidebar and Settings > About offer the update, named by its first 12 commit characters.
+T3 Code Fork checks for a new build 15 seconds after it starts and every 4 minutes after that. A check reads `origin/main` with `git ls-remote` from the checkout named in `fork-release.json`, and fetches only when that commit is not in the checkout yet. When `origin/main` is ahead of the app's commit, the sidebar and Settings > About offer the update, named by its first 12 commit characters.
 
-- Download runs `origin/main`'s copy of the script with `--ref` set to that commit, in the background. Progress reads 10% when the build starts and 90% when it is built. It takes minutes, and quitting the app stops it.
-- Once the build is staged, restart from the sidebar or Settings. The app quits, and a helper waits for every fork process to end, runs `--install-staged` and opens the app again. Its output goes to `~/.t3-fork/releases/install.log`. If the install fails, the old app opens and says the update did not apply.
-- A build the schedule staged while the app ran shows as ready to restart at the next check.
-- The app only moves forward. If `origin/main` no longer contains the app's commit, the check fails and says so.
-- If another run holds the lock, such as the schedule, the download fails and asks you to try again when it ends.
+- Download runs the offered commit's copy of the script with `--ref` set to that commit, in the background. Progress reads 10% when the build starts and 90% when it is built. It takes minutes.
+- Once the build is staged, restart from the sidebar or Settings. The app quits, and a helper waits for every fork process to end, runs `--install-staged` and opens the app again. While another release run holds the lock or a fork process still runs, the helper waits and retries for up to 10 minutes. Its output goes to `~/.t3-fork/releases/install.log`. If the install fails, the old app opens and says the update did not apply.
+- A build the schedule staged while the app ran shows as ready to restart at the next check, if it contains the app's commit. A staged build that does not is ignored.
+- The app only moves forward. If `origin/main` no longer contains the app's commit, the check fails. A failed check shows its reason in the sidebar tooltip and in Settings > About.
+- If another run holds the lock, such as the schedule, the download or restart fails and asks you to try again when it ends. The app keeps running.
 - Remote clients cannot update a fork host. Update it on that Mac.
 - Settings hides the update track. The fork follows `origin/main` only.
 
