@@ -23,7 +23,7 @@ export function ComposerUsageLimits() {
     <div className="flex flex-col gap-2 border-t border-border pt-2 has-[>div:last-child:empty]:hidden">
       <div className="font-medium text-muted-foreground text-xs">Usage</div>
       <div className="-mx-3.5 -mt-2 -mb-2.5 [&_.grid>[tabindex]]:px-1.5">
-        <ThreadDetailsUsage {...value.usage} contextWindow={null} />
+        <ThreadDetailsUsage {...value.usage} />
       </div>
     </div>
   );
