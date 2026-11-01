@@ -153,14 +153,15 @@ export function getDesktopUpdateDisabledReason(
   return state.message?.trim() || "Automatic updates are not available in this build.";
 }
 
-/** A failed check leaves nothing to download or install, so its reason is the only thing to show. */
+/** On the fork a failed check leaves nothing to download or install, so its reason is all there is to show. */
 export function getDesktopUpdateCheckError(
   state: Pick<
     DesktopUpdateState,
     "status" | "message" | "errorContext" | "downloadedVersion"
   > | null,
+  isForkBuild: boolean,
 ): string | null {
-  if (state?.status !== "error") return null;
+  if (!isForkBuild || state?.status !== "error") return null;
   const failedCheck =
     state.errorContext === "check" ||
     (state.errorContext === null && state.downloadedVersion === null);
@@ -172,11 +173,12 @@ export function getDesktopUpdateIdleTooltip(
     DesktopUpdateState,
     "enabled" | "status" | "message" | "errorContext" | "downloadedVersion"
   > | null,
+  isForkBuild: boolean,
 ) {
   const disabledReason = getDesktopUpdateDisabledReason(state);
   if (disabledReason) return { title: "Updates unavailable", detail: disabledReason };
-  const checkError = getDesktopUpdateCheckError(state);
-  return checkError
-    ? { title: "Update check failed", detail: checkError }
-    : { title: "Check for updates", detail: null };
+  const checkError = getDesktopUpdateCheckError(state, isForkBuild);
+  if (checkError === null) return { title: "Check for updates", detail: null };
+  const title = state?.errorContext === "check" ? "Update check failed" : "Updater error";
+  return { title, detail: checkError };
 }

@@ -85,30 +85,43 @@ describe("desktop update UI helpers", () => {
 
 describe("getDesktopUpdateIdleTooltip", () => {
   const failed = "origin/main does not contain this build's commit.";
-  it.each<[string, Partial<DesktopUpdateState>, ReturnType<typeof getDesktopUpdateIdleTooltip>]>([
-    ["nothing happened yet", {}, { title: "Check for updates", detail: null }],
+  const checkFailed = { status: "error", errorContext: "check", message: failed } as const;
+  const updaterFailed = { status: "error", errorContext: null, message: failed } as const;
+  const idle = { title: "Check for updates", detail: null };
+  it.each<
+    [string, Partial<DesktopUpdateState>, boolean, ReturnType<typeof getDesktopUpdateIdleTooltip>]
+  >([
+    ["nothing happened yet", {}, true, idle],
     [
-      "a failed check",
-      { status: "error", errorContext: "check", message: failed },
+      "a failed check on the fork",
+      checkFailed,
+      true,
       { title: "Update check failed", detail: failed },
     ],
+    ["a failed check on an official build", checkFailed, false, idle],
     [
-      "an updater error with nothing downloaded",
-      { status: "error", errorContext: null, message: failed },
-      { title: "Update check failed", detail: failed },
+      "an updater error on the fork",
+      updaterFailed,
+      true,
+      { title: "Updater error", detail: failed },
     ],
+    ["an updater error on an official build", updaterFailed, false, idle],
     [
       "a failed download",
       { status: "error", errorContext: "download", message: failed },
-      { title: "Check for updates", detail: null },
+      true,
+      idle,
     ],
     [
       "disabled updates",
       { enabled: false, status: "disabled", message: "No update feed." },
+      false,
       { title: "Updates unavailable", detail: "No update feed." },
     ],
-  ])("shows %s", (_name, overrides, expected) => {
-    expect(getDesktopUpdateIdleTooltip({ ...baseState, ...overrides })).toEqual(expected);
+  ])("shows %s", (_name, overrides, isForkBuild, expected) => {
+    expect(getDesktopUpdateIdleTooltip({ ...baseState, ...overrides }, isForkBuild)).toEqual(
+      expected,
+    );
   });
 });
 

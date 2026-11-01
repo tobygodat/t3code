@@ -240,7 +240,7 @@ function SidebarUpdateControl() {
     showCheckIcon,
   });
   const idleTooltip =
-    !showUpdateDetails && !showCheckIcon ? getDesktopUpdateIdleTooltip(state) : null;
+    !showUpdateDetails && !showCheckIcon ? getDesktopUpdateIdleTooltip(state, IS_FORK_BUILD) : null;
   const tooltip = runsEverything
     ? everything.summary
     : showUpdateDetails

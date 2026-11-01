@@ -283,7 +283,7 @@ function AboutVersionSection() {
     action === "download" || action === "install"
       ? "Update available."
       : (getDesktopUpdateDisabledReason(updateState) ??
-        getDesktopUpdateCheckError(updateState) ??
+        getDesktopUpdateCheckError(updateState, IS_FORK_BUILD) ??
         "Current version of the application.");
 
   return (
