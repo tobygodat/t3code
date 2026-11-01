@@ -13,7 +13,6 @@ import {
   parseForkRelease,
   releaseEnvironment,
   releaseExitOf,
-  stagedCheck,
   targetCheck,
 } from "./forkRelease.ts";
 
@@ -34,15 +33,6 @@ describe("forkRelease", () => {
     for (const row of rows) {
       assert.deepStrictEqual(targetCheck({ installed: INSTALLED, ...row }), row.expected);
     }
-  });
-
-  it("lets a staged build other than this one win", () => {
-    assert.deepStrictEqual(
-      stagedCheck(INSTALLED, Option.some(TARGET)),
-      Option.some({ _tag: "Staged", fullSha: TARGET, version: "bbbbbbbbbbbb" }),
-    );
-    assert.isTrue(Option.isNone(stagedCheck(INSTALLED, Option.some(INSTALLED))));
-    assert.isTrue(Option.isNone(stagedCheck(INSTALLED, Option.none())));
   });
 
   it("maps release-desktop.sh exit codes", () => {

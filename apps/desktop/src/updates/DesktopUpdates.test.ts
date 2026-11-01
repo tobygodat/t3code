@@ -856,7 +856,7 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("offers fork builds even with a saved Nightly track", () => {
+  it.effect("offers fork builds, staged ones included, even with a saved Nightly track", () => {
     const harness = makeHarness({ kind: "fork", savedChannel: "nightly" });
 
     return Effect.scoped(
@@ -868,6 +868,16 @@ describe("DesktopUpdates", () => {
         yield* flushCallbacks;
 
         assert.equal((yield* updates.getState).availableVersion, "4e49a601ec12");
+
+        // A staged build is reported as one burst within a single check.
+        yield* updates.check("poll");
+        harness.emit("update-available", { version: "5d133bb914aa" });
+        harness.emit("update-downloaded", { version: "5d133bb914aa" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "downloaded");
+        assert.equal(state.downloadedVersion, "5d133bb914aa");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

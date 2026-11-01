@@ -18,6 +18,8 @@ import {
   FORK_RELEASE_FILE,
   IN_APP_RELEASE_SCRIPT_FILE,
   INSTALL_HELPER_SCRIPT,
+  LOCKF_BUSY,
+  RELEASE_LOCK_FILE,
   RELEASE_SCRIPT_PATH,
   type ForkCheck,
   type ForkRelease,
@@ -29,7 +31,6 @@ import {
   releaseExitOf,
   releaseFailureDetail,
   releaseLineProgress,
-  stagedCheck,
   targetCheck,
 } from "./forkRelease.ts";
 
@@ -40,9 +41,17 @@ const STDERR_TAIL_LINES = 3;
 /** Carries the text DesktopUpdates shows; each public method maps it to its own updater error. */
 class ForkUpdateFailure extends Schema.TaggedError<ForkUpdateFailure>()("ForkUpdateFailure", {
   detail: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 
-const fail = (detail: string) => Effect.fail(new ForkUpdateFailure({ detail }));
+const fail = (detail: string, cause?: unknown) =>
+  Effect.fail(new ForkUpdateFailure({ detail, cause }));
+
+const updaterErrorFields = (failure: ForkUpdateFailure) => ({
+  channel: null,
+  cause: failure.cause ?? failure.detail,
+  detail: failure.detail,
+});
 
 type Listener = (...args: ReadonlyArray<unknown>) => void;
 
@@ -95,7 +104,7 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
       return { exitCode, stdout: stdout.trim(), stderr };
     },
     Effect.scoped,
-    Effect.catch((cause) => fail(`Could not run git: ${cause.message}`)),
+    Effect.catch((cause) => fail(`Could not run git: ${cause.message}`, cause)),
   );
 
   const gitFailure = (args: ReadonlyArray<string>, exitCode: number, stderr: string) =>
@@ -134,6 +143,24 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
     return Option.filter(commit, isCommitSha);
   });
 
+  // Updates only move forward, so a staged build counts only when it is `base` or contains it.
+  const stagedFrom = Effect.fn("ForkUpdater.stagedFrom")(function* (base: string) {
+    const staged = yield* readStagedCommit;
+    if (Option.isNone(staged) || staged.value === base) return staged;
+    const descends = yield* isAncestor(base, staged.value).pipe(
+      Effect.catchTags({
+        ForkUpdateFailure: ({ detail }) =>
+          logWarning("could not compare the staged build", { detail }).pipe(Effect.as(false)),
+      }),
+    );
+    if (descends) return staged;
+    yield* logInfo("ignoring a staged build that does not contain the base commit", {
+      staged: staged.value,
+      base,
+    });
+    return Option.none<string>();
+  });
+
   // The script is taken from the commit being built, so app and schedule follow the same rules.
   const writeReleaseScript = Effect.fn("ForkUpdater.writeReleaseScript")(function* (
     commit: string,
@@ -141,7 +168,7 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
     const source = yield* gitOutput(["show", `${commit}:${RELEASE_SCRIPT_PATH}`]);
     yield* fileSystem.makeDirectory(release.releasesDir, { recursive: true }).pipe(
       Effect.andThen(fileSystem.writeFileString(scriptPath, `${source}\n`)),
-      Effect.catch((cause) => fail(`Could not write ${scriptPath}: ${cause.message}`)),
+      Effect.catch((cause) => fail(`Could not write ${scriptPath}: ${cause.message}`, cause)),
     );
   });
 
@@ -154,13 +181,28 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
     ),
   );
 
+  // ls-remote reads origin without touching the checkout; fetch only for a commit not here yet.
+  const remoteMain = Effect.gen(function* () {
+    const listing = yield* gitOutput(["ls-remote", "origin", "refs/heads/main"]);
+    const target = listing.split(/\s/)[0] ?? "";
+    if (!isCommitSha(target)) return yield* fail(`origin has no main branch ("${listing}").`);
+    const present = yield* git(["cat-file", "-e", `${target}^{commit}`]);
+    if (present.exitCode !== 0) {
+      yield* gitOutput(["fetch", "--quiet", "--no-write-fetch-head", "origin", "main"]);
+    }
+    return target;
+  });
+
   const resolveCheck = Effect.gen(function* () {
-    const staged = stagedCheck(release.commit, yield* readStagedCommit);
-    if (Option.isSome(staged)) return staged.value;
-    yield* gitOutput(["fetch", "--quiet", "origin", "main"]);
-    const target = yield* gitOutput(["rev-parse", "--verify", "--quiet", "origin/main^{commit}"]);
-    if (!isCommitSha(target))
-      return yield* fail(`git rev-parse returned "${target}" for origin/main.`);
+    const staged = yield* stagedFrom(release.commit);
+    if (Option.isSome(staged) && staged.value !== release.commit) {
+      return {
+        _tag: "Staged",
+        fullSha: staged.value,
+        version: forkVersionOf(staged.value),
+      } satisfies ForkCheck;
+    }
+    const target = yield* remoteMain;
     const descends = target === release.commit || (yield* isAncestor(release.commit, target));
     return targetCheck({ installed: release.commit, target, descends });
   });
@@ -210,11 +252,16 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
       return { exitCode, stderrTail: tailLines(stderr) };
     },
     Effect.scoped,
-    Effect.catch((cause) => fail(`The fork build did not finish: ${cause.message}`)),
+    Effect.catch((cause) => fail(`The fork build did not finish: ${cause.message}`, cause)),
   );
 
   const download = Effect.gen(function* () {
     const offered = yield* requireOffered;
+    const ready = yield* stagedFrom(offered);
+    if (Option.isSome(ready)) {
+      yield* Ref.set(offeredRef, ready);
+      return yield* emit("update-downloaded", { version: forkVersionOf(ready.value) });
+    }
     yield* writeReleaseScript(offered);
     yield* logInfo("building fork update", { commit: offered });
     const { exitCode, stderrTail } = yield* runRelease(offered);
@@ -265,26 +312,50 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
       return handle.pid;
     },
     Effect.scoped,
-    Effect.catch((cause) => fail(`Could not start the fork installer: ${cause.message}`)),
+    Effect.catch((cause) => fail(`Could not start the fork installer: ${cause.message}`, cause)),
   );
+
+  // -k and -n: the probe neither deletes nor creates the lock file the script holds open.
+  const requireReleaseLockFree = Effect.gen(function* () {
+    const exitCode = yield* spawner
+      .exitCode(
+        ChildProcess.make(
+          "/usr/bin/lockf",
+          [
+            "-k",
+            "-n",
+            "-s",
+            "-t",
+            "0",
+            path.join(release.releasesDir, RELEASE_LOCK_FILE),
+            "/usr/bin/true",
+          ],
+          { extendEnv: false, stdin: "ignore", stdout: "ignore", stderr: "ignore" },
+        ),
+      )
+      .pipe(Effect.catch((cause) => fail("Could not check the fork release lock.", cause)));
+    if (exitCode === LOCKF_BUSY) {
+      return yield* fail("Another fork release is running. Try again when it finishes.");
+    }
+  });
 
   const install = Effect.gen(function* () {
     const offered = yield* requireOffered;
-    const staged = yield* readStagedCommit;
-    if (Option.isNone(staged))
-      return yield* fail("No fork build is staged. Check for updates again.");
+    yield* requireReleaseLockFree;
     // The schedule may have staged a newer build since; installing that still moves forward.
-    if (staged.value !== offered && !(yield* isAncestor(offered, staged.value))) {
+    const staged = yield* stagedFrom(offered);
+    if (Option.isNone(staged)) {
       return yield* fail(
-        `The staged build ${forkVersionOf(staged.value)} is not ${forkVersionOf(offered)} or newer. Check for updates again.`,
+        `No staged build is ${forkVersionOf(offered)} or newer. Check for updates again.`,
       );
     }
     yield* writeReleaseScript(staged.value);
     const pid = yield* startInstallHelper();
     yield* logInfo("fork installer started; quitting", { pid, commit: staged.value });
-    // A later macrotask: before-quit interrupts running fibers, and an interrupted
-    // DesktopUpdates.install deletes its install record and restart marker.
-    yield* electronApp.quit.pipe(Effect.delay(Duration.zero), Effect.forkDetach);
+    // before-quit interrupts running fibers, and an interrupted DesktopUpdates.install deletes its
+    // install record and restart marker. Nothing it runs after this returns waits on I/O, so it
+    // has returned before a timer fires.
+    yield* electronApp.quit.pipe(Effect.delay(Duration.millis(1)), Effect.forkDetach);
   });
 
   return ElectronUpdater.ElectronUpdater.of({
@@ -301,29 +372,17 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
     checkForUpdates: emit("checking-for-update").pipe(
       Effect.andThen(resolveCheck),
       Effect.flatMap(reportCheck),
-      Effect.catchTags({
-        ForkUpdateFailure: ({ detail }) =>
-          Effect.fail(
-            new ElectronUpdater.ElectronUpdaterCheckForUpdatesError({
-              channel: null,
-              cause: detail,
-              detail,
-            }),
-          ),
-      }),
+      Effect.mapError(
+        (failure) =>
+          new ElectronUpdater.ElectronUpdaterCheckForUpdatesError(updaterErrorFields(failure)),
+      ),
       Effect.withSpan("ForkUpdater.checkForUpdates"),
     ),
     downloadUpdate: download.pipe(
-      Effect.catchTags({
-        ForkUpdateFailure: ({ detail }) =>
-          Effect.fail(
-            new ElectronUpdater.ElectronUpdaterDownloadUpdateError({
-              channel: null,
-              cause: detail,
-              detail,
-            }),
-          ),
-      }),
+      Effect.mapError(
+        (failure) =>
+          new ElectronUpdater.ElectronUpdaterDownloadUpdateError(updaterErrorFields(failure)),
+      ),
       Effect.withSpan("ForkUpdater.downloadUpdate"),
     ),
     quitAndInstall: Effect.fn("ForkUpdater.quitAndInstall")(function ({
@@ -331,18 +390,14 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
       isForceRunAfter,
     }) {
       return install.pipe(
-        Effect.catchTags({
-          ForkUpdateFailure: ({ detail }) =>
-            Effect.fail(
-              new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
-                channel: null,
-                isSilent,
-                isForceRunAfter,
-                cause: detail,
-                detail,
-              }),
-            ),
-        }),
+        Effect.mapError(
+          (failure) =>
+            new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
+              ...updaterErrorFields(failure),
+              isSilent,
+              isForceRunAfter,
+            }),
+        ),
       );
     }),
     on: Effect.fn("ForkUpdater.on")(function (eventName, listener) {

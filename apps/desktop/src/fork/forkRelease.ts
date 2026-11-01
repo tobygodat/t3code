@@ -1,4 +1,3 @@
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 const AbsolutePath = Schema.String.check(Schema.isPattern(/^\/./));
@@ -16,6 +15,10 @@ export type ForkRelease = typeof ForkRelease.Type;
 export const FORK_RELEASE_FILE = "fork-release.json";
 export const RELEASE_SCRIPT_PATH = "scripts/fork/release-desktop.sh";
 export const IN_APP_RELEASE_SCRIPT_FILE = ".in-app-release-desktop.sh";
+/** release-desktop.sh holds this with lockf for its whole run. */
+export const RELEASE_LOCK_FILE = ".release.lock";
+/** lockf's EX_TEMPFAIL: another process holds the lock. */
+export const LOCKF_BUSY = 75;
 
 export const parseForkRelease = Schema.decodeUnknownOption(Schema.fromJsonString(ForkRelease));
 
@@ -30,13 +33,6 @@ export type ForkCheck =
   | { readonly _tag: "Available"; readonly fullSha: string; readonly version: string }
   | { readonly _tag: "Staged"; readonly fullSha: string; readonly version: string }
   | { readonly _tag: "NotDescendant"; readonly fullSha: string };
-
-/** A staged build that is not this one wins over origin/main: a restart is cheap, a build is not. */
-export const stagedCheck = (installed: string, staged: Option.Option<string>) =>
-  staged.pipe(
-    Option.filter((sha) => sha !== installed),
-    Option.map((sha): ForkCheck => ({ _tag: "Staged", fullSha: sha, version: forkVersionOf(sha) })),
-  );
 
 /** Only forward moves are offered; a rewound or diverged origin/main is reported, not installed. */
 export const targetCheck = (input: {
