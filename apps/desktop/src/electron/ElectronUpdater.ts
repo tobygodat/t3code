@@ -77,6 +77,11 @@ export class ElectronUpdater extends Context.Service<
     readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
     readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
     readonly downloadUpdate: Effect.Effect<void, ElectronUpdaterDownloadUpdateError>;
+    /** Refuses an install before DesktopUpdates stops anything for it; the fork checks its release lock. */
+    readonly installPreflight?: (options: {
+      readonly isSilent: boolean;
+      readonly isForceRunAfter: boolean;
+    }) => Effect.Effect<void, ElectronUpdaterQuitAndInstallError>;
     readonly quitAndInstall: (options: {
       readonly isSilent: boolean;
       readonly isForceRunAfter: boolean;

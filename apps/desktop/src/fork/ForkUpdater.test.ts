@@ -172,6 +172,9 @@ const gitSubcommands = (commands: ReadonlyArray<ReadonlyArray<string>>) =>
 
 const installOptions = { isSilent: true, isForceRunAfter: true };
 
+const preflight = (updater: Effect.Success<ReturnType<typeof ForkUpdater.make>>) =>
+  updater.installPreflight?.(installOptions) ?? Effect.die("the fork updater has no preflight");
+
 describe("ForkUpdater", () => {
   it.effect("offers origin/main's full commit and builds exactly that commit", () =>
     withUpdater(
@@ -307,12 +310,12 @@ describe("ForkUpdater", () => {
     ),
   );
 
-  it.effect("refuses to install a staged build that is not the offered commit or newer", () =>
+  it.effect("refuses at preflight a staged build that is not the offered commit or newer", () =>
     withUpdater({}, ({ updater, commands, quitCount, stage }) =>
       Effect.gen(function* () {
         yield* updater.checkForUpdates;
         yield* stage(OTHER);
-        const error = yield* Effect.flip(updater.quitAndInstall(installOptions));
+        const error = yield* Effect.flip(preflight(updater));
         assert.equal(error._tag, "ElectronUpdaterQuitAndInstallError");
         assert.include(error.message, "No staged build is bbbbbbbbbbbb or newer");
         assert.isFalse(commands.some(([, flag]) => flag === "-c"));
@@ -322,12 +325,12 @@ describe("ForkUpdater", () => {
     ),
   );
 
-  it.effect("refuses to install while another release run holds the lock", () =>
+  it.effect("refuses at preflight while another release run holds the lock", () =>
     withUpdater({ lockExit: 75 }, ({ updater, commands, quitCount, stage }) =>
       Effect.gen(function* () {
         yield* updater.checkForUpdates;
         yield* stage(TARGET);
-        const error = yield* Effect.flip(updater.quitAndInstall(installOptions));
+        const error = yield* Effect.flip(preflight(updater));
         assert.equal(error.message, "Another fork release is running. Try again when it finishes.");
         assert.isFalse(commands.some(([, flag]) => flag === "-c"));
         yield* TestClock.adjust(Duration.millis(1));
@@ -341,6 +344,7 @@ describe("ForkUpdater", () => {
       Effect.gen(function* () {
         yield* updater.checkForUpdates;
         yield* stage(NEWER);
+        yield* preflight(updater);
         yield* updater.quitAndInstall(installOptions);
         assert.equal(quitCount(), 0);
 

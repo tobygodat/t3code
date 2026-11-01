@@ -546,6 +546,59 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("refuses an install at preflight before quitting or stopping backends", () => {
+    let preflights = 0;
+    let stops = 0;
+    const harness = makeHarness({
+      installPreflight: Effect.suspend(() =>
+        (preflights += 1) === 1
+          ? Effect.fail(
+              new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
+                channel: null,
+                isSilent: true,
+                isForceRunAfter: true,
+                cause: "release lock busy",
+                detail: "Another fork release is running. Try again when it finishes.",
+              }),
+            )
+          : Effect.void,
+      ),
+      stopBackend: Effect.sync(() => {
+        stops += 1;
+      }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const desktopState = yield* DesktopState.DesktopState;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const refused = yield* updates.install;
+        assert.deepInclude(refused, { accepted: true, completed: false });
+        assert.deepInclude(refused.state, {
+          status: "downloaded",
+          downloadedVersion: "1.2.4",
+          errorContext: "install",
+          message: "Another fork release is running. Try again when it finishes.",
+        });
+        assert.equal(stops, 0);
+        assert.equal(harness.quitAndInstalls(), 0);
+        assert.isFalse(yield* Ref.get(desktopState.quitting));
+        assert.equal(harness.updateRestartMarkers.size, 0);
+        assert.equal(harness.installRecords.size, 0);
+
+        // The refusal released the install action, so a retry goes through.
+        const retried = yield* updates.install;
+        assert.isTrue(retried.accepted);
+        assert.equal(stops, 1);
+        assert.equal(harness.quitAndInstalls(), 1);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("keeps the disabled primary stopped when quitAndInstall fails", () => {
     const harness = makeHarness({
       backendDesiredRunning: false,

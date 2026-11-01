@@ -53,6 +53,14 @@ const updaterErrorFields = (failure: ForkUpdateFailure) => ({
   detail: failure.detail,
 });
 
+const quitAndInstallError =
+  (options: { readonly isSilent: boolean; readonly isForceRunAfter: boolean }) =>
+  (failure: ForkUpdateFailure) =>
+    new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
+      ...updaterErrorFields(failure),
+      ...options,
+    });
+
 type Listener = (...args: ReadonlyArray<unknown>) => void;
 
 const tailLines = (text: string) =>
@@ -339,7 +347,8 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
     }
   });
 
-  const install = Effect.gen(function* () {
+  // The build to install. Also the install preflight, so a refusal comes before backends stop.
+  const installable = Effect.gen(function* () {
     const offered = yield* requireOffered;
     yield* requireReleaseLockFree;
     // The schedule may have staged a newer build since; installing that still moves forward.
@@ -349,9 +358,14 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
         `No staged build is ${forkVersionOf(offered)} or newer. Check for updates again.`,
       );
     }
-    yield* writeReleaseScript(staged.value);
+    return staged.value;
+  });
+
+  const install = Effect.gen(function* () {
+    const staged = yield* installable;
+    yield* writeReleaseScript(staged);
     const pid = yield* startInstallHelper();
-    yield* logInfo("fork installer started; quitting", { pid, commit: staged.value });
+    yield* logInfo("fork installer started; quitting", { pid, commit: staged });
     // before-quit interrupts running fibers, and an interrupted DesktopUpdates.install deletes its
     // install record and restart marker. Nothing it runs after this returns waits on I/O, so it
     // has returned before a timer fires.
@@ -385,20 +399,11 @@ export const make = Effect.fn("ForkUpdater.make")(function* (release: ForkReleas
       ),
       Effect.withSpan("ForkUpdater.downloadUpdate"),
     ),
-    quitAndInstall: Effect.fn("ForkUpdater.quitAndInstall")(function ({
-      isSilent,
-      isForceRunAfter,
-    }) {
-      return install.pipe(
-        Effect.mapError(
-          (failure) =>
-            new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
-              ...updaterErrorFields(failure),
-              isSilent,
-              isForceRunAfter,
-            }),
-        ),
-      );
+    installPreflight: Effect.fn("ForkUpdater.installPreflight")(function (options) {
+      return installable.pipe(Effect.asVoid, Effect.mapError(quitAndInstallError(options)));
+    }),
+    quitAndInstall: Effect.fn("ForkUpdater.quitAndInstall")(function (options) {
+      return install.pipe(Effect.mapError(quitAndInstallError(options)));
     }),
     on: Effect.fn("ForkUpdater.on")(function (eventName, listener) {
       const untypedListener = listener as unknown as Listener;

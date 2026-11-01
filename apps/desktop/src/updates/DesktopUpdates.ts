@@ -682,6 +682,15 @@ export const make = Effect.gen(function* () {
     { discard: true },
   );
 
+  const logInstallError = (error: ElectronUpdater.ElectronUpdaterQuitAndInstallError) =>
+    logUpdaterError(error.message, {
+      errorTag: error._tag,
+      cause: describeUpdateErrorCause(error.cause),
+      channel: error.channel,
+      isSilent: error.isSilent,
+      isForceRunAfter: error.isForceRunAfter,
+    });
+
   const recoverFailedInstall = Effect.fn("desktop.updates.recoverFailedInstall")(function* (
     message: string,
   ) {
@@ -764,6 +773,25 @@ export const make = Effect.gen(function* () {
           return { accepted: false, completed: false, failed: false };
         }
 
+        const preflightRefused = yield* (
+          electronUpdater.installPreflight?.({ isSilent: true, isForceRunAfter: true }) ??
+          Effect.void
+        ).pipe(
+          Effect.as(false),
+          Effect.catchTags({
+            ElectronUpdaterQuitAndInstallError: (error) =>
+              updateState((current) =>
+                reduceDesktopUpdateStateOnInstallFailure(current, error.message),
+              ).pipe(Effect.andThen(logInstallError(error)), Effect.as(true)),
+          }),
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) && !exit.value ? Effect.void : finishUpdateAction("install"),
+          ),
+        );
+        if (preflightRefused) {
+          return { accepted: true, completed: false, failed: true };
+        }
+
         yield* Ref.set(desktopState.quitting, true);
         yield* Ref.set(installRunningBackendsRef, []);
 
@@ -793,13 +821,7 @@ export const make = Effect.gen(function* () {
             ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
               function* (error) {
                 yield* recoverFailedInstall(error.message);
-                yield* logUpdaterError(error.message, {
-                  errorTag: error._tag,
-                  cause: describeUpdateErrorCause(error.cause),
-                  channel: error.channel,
-                  isSilent: error.isSilent,
-                  isForceRunAfter: error.isForceRunAfter,
-                });
+                yield* logInstallError(error);
                 return { accepted: true, completed: false, failed: true };
               },
             ),
