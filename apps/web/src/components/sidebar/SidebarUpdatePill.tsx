@@ -4,6 +4,7 @@ import { type ComponentProps, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../../env";
+import { IS_FORK_BUILD } from "../../fork/forkBuild";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
@@ -223,7 +224,7 @@ function SidebarUpdateControl() {
   const localUpdateVersion =
     state && action !== "none" ? getDesktopUpdateDownloadedVersion(state) : null;
   const everything = useUpdateEverything(localUpdateVersion);
-  const runsEverything = everything.hasUpdates && !isDownloading;
+  const runsEverything = everything.hasUpdates && !isDownloading && !IS_FORK_BUILD;
   const run = useUpdateEverythingRun();
   const isRunningEverything = run !== null;
   const showCheckIcon = shouldShowDesktopUpdateCheckIcon({

@@ -40,6 +40,7 @@ import {
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
+import { IS_FORK_BUILD } from "../../fork/forkBuild";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import {
   readAppearanceModePreference,
@@ -306,7 +307,7 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
-      {hasDesktopBridge ? (
+      {hasDesktopBridge && !IS_FORK_BUILD ? (
         <SettingsRow
           {...searchableSetting("update-track")}
           description={

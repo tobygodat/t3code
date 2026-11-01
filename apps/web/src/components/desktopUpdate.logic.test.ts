@@ -76,6 +76,10 @@ describe("desktop update UI helpers", () => {
       );
     },
   );
+
+  it("has no release page for a version that is not a release, such as a fork commit", () => {
+    expect(getDesktopUpdateReleaseUrl("4e49a601ec12")).toBeNull();
+  });
 });
 
 describe("canCheckForUpdate", () => {

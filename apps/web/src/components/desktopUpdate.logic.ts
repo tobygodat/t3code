@@ -31,7 +31,8 @@ export function getDesktopUpdateReleaseUrl(
   repository: string | undefined = import.meta.env.T3CODE_DESKTOP_UPDATE_REPOSITORY,
 ): string | null {
   const normalizedVersion = version?.trim();
-  if (!normalizedVersion) return null;
+  // Only a release has a release page; a fork update is named by its commit.
+  if (!normalizedVersion || !/^\d+\.\d+\.\d+/.test(normalizedVersion)) return null;
   return `${desktopReleaseRepositoryUrl(repository)}/tag/v${encodeURIComponent(normalizedVersion)}`;
 }
 
