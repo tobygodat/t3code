@@ -41,6 +41,23 @@ describe("DesktopUpdates", () => {
     }),
   );
 
+  it.effect("enables a self-fed fork updater without a feed or despite the env flag", () =>
+    Effect.gen(function* () {
+      const env = { T3CODE_DESKTOP_MOCK_UPDATES: undefined, T3CODE_DISABLE_AUTO_UPDATE: "1" };
+      const configuredStatus = (kind: "electron-updater" | "fork") =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const updates = yield* DesktopUpdates.DesktopUpdates;
+            yield* updates.configure;
+            return (yield* updates.getState).status;
+          }),
+        ).pipe(Effect.provide(Layer.merge(TestClock.layer(), makeHarness({ kind, env }).layer)));
+
+      assert.equal(yield* configuredStatus("fork"), "idle");
+      assert.equal(yield* configuredStatus("electron-updater"), "disabled");
+    }),
+  );
+
   it.effect("keeps the disabled reason available after configuration and channel changes", () => {
     const harness = makeHarness({ env: { T3CODE_DISABLE_AUTO_UPDATE: "true" } });
     const reason = "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
@@ -835,6 +852,22 @@ describe("DesktopUpdates", () => {
         assert.equal((yield* updates.getState).channel, "nightly");
         assert.isNull((yield* updates.getState).availableVersion);
         assert.deepEqual(harness.checkAllowedDowngrade, [false]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("offers fork builds even with a saved Nightly track", () => {
+    const harness = makeHarness({ kind: "fork", savedChannel: "nightly" });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* updates.check("startup");
+        harness.emit("update-available", { version: "4e49a601ec12" });
+        yield* flushCallbacks;
+
+        assert.equal((yield* updates.getState).availableVersion, "4e49a601ec12");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

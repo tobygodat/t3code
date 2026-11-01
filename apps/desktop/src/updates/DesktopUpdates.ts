@@ -322,14 +322,16 @@ function getAutoUpdateDisabledReason(args: {
   isDebPackage: boolean;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
+  /** Builds its own updates, so the feed and T3CODE_DISABLE_AUTO_UPDATE rules do not apply. */
+  selfFed: boolean;
 }): string | null {
-  if (!args.hasUpdateFeedConfig) {
+  if (!args.selfFed && !args.hasUpdateFeedConfig) {
     return "Automatic updates are not available because no update feed is configured.";
   }
   if (args.isDevelopment || !args.isPackaged) {
     return "Automatic updates are only available in packaged production builds.";
   }
-  if (args.disabledByEnv) {
+  if (!args.selfFed && args.disabledByEnv) {
     return "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
   }
   if (args.platform === "linux" && !args.appImage && !args.isDebPackage) {
@@ -366,14 +368,16 @@ export const make = Effect.gen(function* () {
   // through such a switch, and never below that release: version order alone cannot tell whether
   // a Stable knows a Nightly's migrations.
   const releaseFloorRef = yield* Ref.make(Option.none<string>());
+  // The fork has one track: origin/main. A saved Nightly track must not hide its builds.
   const offerable = (version: string, state: DesktopUpdateState) =>
     Ref.get(releaseFloorRef).pipe(
       Effect.map(
         (floor) =>
-          desktopUpdateChannelOf(version) === state.channel &&
-          (Option.isSome(floor)
-            ? compareSemverVersions(version, floor.value) >= 0
-            : desktopUpdateChannelOf(environment.appVersion) === state.channel),
+          electronUpdater.kind === "fork" ||
+          (desktopUpdateChannelOf(version) === state.channel &&
+            (Option.isSome(floor)
+              ? compareSemverVersions(version, floor.value) >= 0
+              : desktopUpdateChannelOf(environment.appVersion) === state.channel)),
       ),
     );
   const updateStateRef = yield* Ref.make<DesktopUpdateState>(
@@ -445,6 +449,7 @@ export const make = Effect.gen(function* () {
         isDebPackage,
         disabledByEnv: config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
+        selfFed: electronUpdater.kind === "fork",
       }),
     );
   });
