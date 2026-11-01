@@ -97,19 +97,21 @@ describe("forkRelease", () => {
     }
   });
 
-  it.live("installs once after the app exits, then relaunches even when the install fails", () =>
+  it.live("retries a busy install after the app exits, then relaunches even when it fails", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const releases = yield* fileSystem.makeTempDirectoryScoped();
       const events = path.join(releases, "events");
+      const busyOnce = path.join(releases, "busy-once");
       const app = yield* spawner.spawn(ChildProcess.make("sleep", ["1"]));
       const script = path.join(releases, "release-desktop.sh");
       yield* fileSystem.writeFileString(
         script,
         `state=$(kill -0 ${app.pid} 2>/dev/null && echo app-running || echo app-gone)
 echo "install $* $state" >>"${events}"
+[ -e "${busyOnce}" ] || { : >"${busyOnce}"; exit 73; }
 exit 1
 `,
       );
@@ -134,12 +136,12 @@ exit 1
 
       assert.deepStrictEqual((yield* fileSystem.readFileString(events)).trim().split("\n"), [
         "install --install-staged app-gone",
+        "install --install-staged app-gone",
         "relaunch",
       ]);
-      assert.include(
-        yield* fileSystem.readFileString(path.join(releases, "install.log")),
-        "--install-staged exited 1",
-      );
+      const log = yield* fileSystem.readFileString(path.join(releases, "install.log"));
+      assert.include(log, "--install-staged exited 73");
+      assert.include(log, "--install-staged exited 1");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

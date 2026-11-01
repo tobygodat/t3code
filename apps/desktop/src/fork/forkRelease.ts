@@ -135,20 +135,27 @@ export const installHelperEnvironment = (env: NodeJS.ProcessEnv): Record<string,
 
 /** Args: <name> <pid> <installPath> <releasesDir> <script> <relaunch argv...>. Waits for every
  *  process from the bundle or releases folder (release-desktop.sh refuses to swap while one runs),
- *  installs once, and relaunches even after a failed install so the old app reports it. */
+ *  retries for up to 10 minutes while another release run holds the lock (73) or a copy still
+ *  runs (75), and relaunches even after a failed install so the old app reports it. */
 export const INSTALL_HELPER_SCRIPT = `pid=$1 install_path=$2 releases=$3 script=$4
 shift 4
 exec >>"$releases/install.log" 2>&1
 echo "$(date): waiting for process $pid to quit"
 n=0
 while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 600 ]; do sleep 0.2; n=$((n + 1)); done
-n=0
-while ps -axo comm= | grep -qF -e "$install_path/" -e "$releases/" && [ "$n" -lt 600 ]; do
-  sleep 0.2
-  n=$((n + 1))
+deadline=$(($(date +%s) + 600))
+while :; do
+  n=0
+  while ps -axo comm= | grep -qF -e "$install_path/" -e "$releases/" && [ "$n" -lt 600 ]; do
+    sleep 0.2
+    n=$((n + 1))
+  done
+  status=0
+  /bin/sh "$script" --install-staged || status=$?
+  echo "$(date): release-desktop.sh --install-staged exited $status"
+  case $status in 73 | 75) ;; *) break ;; esac
+  [ "$(date +%s)" -lt "$deadline" ] || break
+  sleep 2
 done
-status=0
-/bin/sh "$script" --install-staged || status=$?
-echo "$(date): release-desktop.sh --install-staged exited $status"
 exec "$@"
 `;
