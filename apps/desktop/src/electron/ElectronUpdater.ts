@@ -15,9 +15,11 @@ export class ElectronUpdaterCheckForUpdatesError extends Schema.TaggedError<Elec
   {
     channel: Schema.NullOr(Schema.String),
     cause: Schema.Defect(),
+    detail: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
+    if (this.detail !== undefined) return this.detail;
     return `Electron updater failed to check for updates on channel ${this.channel ?? "default"}.`;
   }
 }
@@ -27,9 +29,11 @@ export class ElectronUpdaterDownloadUpdateError extends Schema.TaggedError<Elect
   {
     channel: Schema.NullOr(Schema.String),
     cause: Schema.Defect(),
+    detail: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
+    if (this.detail !== undefined) return this.detail;
     return `Electron updater failed to download the update on channel ${this.channel ?? "default"}.`;
   }
 }
@@ -41,9 +45,11 @@ export class ElectronUpdaterQuitAndInstallError extends Schema.TaggedError<Elect
     isSilent: Schema.Boolean,
     isForceRunAfter: Schema.Boolean,
     cause: Schema.Defect(),
+    detail: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
+    if (this.detail !== undefined) return this.detail;
     return `Electron updater failed to quit and install the update on channel ${this.channel ?? "default"} (silent: ${this.isSilent}, force run after: ${this.isForceRunAfter}).`;
   }
 }
@@ -58,6 +64,8 @@ export type ElectronUpdaterError = typeof ElectronUpdaterError.Type;
 export class ElectronUpdater extends Context.Service<
   ElectronUpdater,
   {
+    /** "fork" builds its updates from source and needs no feed; see fork/ForkUpdater.ts. */
+    readonly kind: "electron-updater" | "fork";
     readonly setFeedURL: (options: ElectronUpdaterFeedUrl) => Effect.Effect<void>;
     readonly setAutoDownload: (value: boolean) => Effect.Effect<void>;
     readonly setAutoInstallOnAppQuit: (value: boolean) => Effect.Effect<void>;
@@ -82,6 +90,7 @@ export class ElectronUpdater extends Context.Service<
 
 /** @public */
 export const make = ElectronUpdater.of({
+  kind: "electron-updater",
   setFeedURL: Effect.fn("ElectronUpdater.setFeedURL")(function (options) {
     return Effect.suspend(() => {
       autoUpdater.setFeedURL(options);
