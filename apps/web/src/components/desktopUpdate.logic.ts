@@ -153,11 +153,30 @@ export function getDesktopUpdateDisabledReason(
   return state.message?.trim() || "Automatic updates are not available in this build.";
 }
 
+/** A failed check leaves nothing to download or install, so its reason is the only thing to show. */
+export function getDesktopUpdateCheckError(
+  state: Pick<
+    DesktopUpdateState,
+    "status" | "message" | "errorContext" | "downloadedVersion"
+  > | null,
+): string | null {
+  if (state?.status !== "error") return null;
+  const failedCheck =
+    state.errorContext === "check" ||
+    (state.errorContext === null && state.downloadedVersion === null);
+  return failedCheck ? state.message?.trim() || null : null;
+}
+
 export function getDesktopUpdateIdleTooltip(
-  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+  state: Pick<
+    DesktopUpdateState,
+    "enabled" | "status" | "message" | "errorContext" | "downloadedVersion"
+  > | null,
 ) {
   const disabledReason = getDesktopUpdateDisabledReason(state);
-  return disabledReason
-    ? { title: "Updates unavailable", detail: disabledReason }
+  if (disabledReason) return { title: "Updates unavailable", detail: disabledReason };
+  const checkError = getDesktopUpdateCheckError(state);
+  return checkError
+    ? { title: "Update check failed", detail: checkError }
     : { title: "Check for updates", detail: null };
 }
