@@ -4,6 +4,7 @@ import type { DesktopUpdateState } from "@t3tools/contracts";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateIdleTooltip,
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateReleaseUrl,
   resolveDesktopUpdateButtonAction,
@@ -76,6 +77,52 @@ describe("desktop update UI helpers", () => {
       );
     },
   );
+
+  it("has no release page for a version that is not a release, such as a fork commit", () => {
+    expect(getDesktopUpdateReleaseUrl("4e49a601ec12")).toBeNull();
+  });
+});
+
+describe("getDesktopUpdateIdleTooltip", () => {
+  const failed = "origin/main does not contain this build's commit.";
+  const checkFailed = { status: "error", errorContext: "check", message: failed } as const;
+  const updaterFailed = { status: "error", errorContext: null, message: failed } as const;
+  const idle = { title: "Check for updates", detail: null };
+  it.each<
+    [string, Partial<DesktopUpdateState>, boolean, ReturnType<typeof getDesktopUpdateIdleTooltip>]
+  >([
+    ["nothing happened yet", {}, true, idle],
+    [
+      "a failed check on the fork",
+      checkFailed,
+      true,
+      { title: "Update check failed", detail: failed },
+    ],
+    ["a failed check on an official build", checkFailed, false, idle],
+    [
+      "an updater error on the fork",
+      updaterFailed,
+      true,
+      { title: "Updater error", detail: failed },
+    ],
+    ["an updater error on an official build", updaterFailed, false, idle],
+    [
+      "a failed download",
+      { status: "error", errorContext: "download", message: failed },
+      true,
+      idle,
+    ],
+    [
+      "disabled updates",
+      { enabled: false, status: "disabled", message: "No update feed." },
+      false,
+      { title: "Updates unavailable", detail: "No update feed." },
+    ],
+  ])("shows %s", (_name, overrides, isForkBuild, expected) => {
+    expect(getDesktopUpdateIdleTooltip({ ...baseState, ...overrides }, isForkBuild)).toEqual(
+      expected,
+    );
+  });
 });
 
 describe("canCheckForUpdate", () => {

@@ -322,14 +322,16 @@ function getAutoUpdateDisabledReason(args: {
   isDebPackage: boolean;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
+  /** Builds its own updates, so the feed and T3CODE_DISABLE_AUTO_UPDATE rules do not apply. */
+  selfFed: boolean;
 }): string | null {
-  if (!args.hasUpdateFeedConfig) {
+  if (!args.selfFed && !args.hasUpdateFeedConfig) {
     return "Automatic updates are not available because no update feed is configured.";
   }
   if (args.isDevelopment || !args.isPackaged) {
     return "Automatic updates are only available in packaged production builds.";
   }
-  if (args.disabledByEnv) {
+  if (!args.selfFed && args.disabledByEnv) {
     return "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
   }
   if (args.platform === "linux" && !args.appImage && !args.isDebPackage) {
@@ -366,14 +368,16 @@ export const make = Effect.gen(function* () {
   // through such a switch, and never below that release: version order alone cannot tell whether
   // a Stable knows a Nightly's migrations.
   const releaseFloorRef = yield* Ref.make(Option.none<string>());
+  // The fork has one track: origin/main. A saved Nightly track must not hide its builds.
   const offerable = (version: string, state: DesktopUpdateState) =>
     Ref.get(releaseFloorRef).pipe(
       Effect.map(
         (floor) =>
-          desktopUpdateChannelOf(version) === state.channel &&
-          (Option.isSome(floor)
-            ? compareSemverVersions(version, floor.value) >= 0
-            : desktopUpdateChannelOf(environment.appVersion) === state.channel),
+          electronUpdater.kind === "fork" ||
+          (desktopUpdateChannelOf(version) === state.channel &&
+            (Option.isSome(floor)
+              ? compareSemverVersions(version, floor.value) >= 0
+              : desktopUpdateChannelOf(environment.appVersion) === state.channel)),
       ),
     );
   const updateStateRef = yield* Ref.make<DesktopUpdateState>(
@@ -445,6 +449,7 @@ export const make = Effect.gen(function* () {
         isDebPackage,
         disabledByEnv: config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
+        selfFed: electronUpdater.kind === "fork",
       }),
     );
   });
@@ -677,6 +682,15 @@ export const make = Effect.gen(function* () {
     { discard: true },
   );
 
+  const logInstallError = (error: ElectronUpdater.ElectronUpdaterQuitAndInstallError) =>
+    logUpdaterError(error.message, {
+      errorTag: error._tag,
+      cause: describeUpdateErrorCause(error.cause),
+      channel: error.channel,
+      isSilent: error.isSilent,
+      isForceRunAfter: error.isForceRunAfter,
+    });
+
   const recoverFailedInstall = Effect.fn("desktop.updates.recoverFailedInstall")(function* (
     message: string,
   ) {
@@ -759,6 +773,25 @@ export const make = Effect.gen(function* () {
           return { accepted: false, completed: false, failed: false };
         }
 
+        const preflightRefused = yield* (
+          electronUpdater.installPreflight?.({ isSilent: true, isForceRunAfter: true }) ??
+          Effect.void
+        ).pipe(
+          Effect.as(false),
+          Effect.catchTags({
+            ElectronUpdaterQuitAndInstallError: (error) =>
+              updateState((current) =>
+                reduceDesktopUpdateStateOnInstallFailure(current, error.message),
+              ).pipe(Effect.andThen(logInstallError(error)), Effect.as(true)),
+          }),
+          Effect.onExit((exit) =>
+            Exit.isSuccess(exit) && !exit.value ? Effect.void : finishUpdateAction("install"),
+          ),
+        );
+        if (preflightRefused) {
+          return { accepted: true, completed: false, failed: true };
+        }
+
         yield* Ref.set(desktopState.quitting, true);
         yield* Ref.set(installRunningBackendsRef, []);
 
@@ -788,13 +821,7 @@ export const make = Effect.gen(function* () {
             ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
               function* (error) {
                 yield* recoverFailedInstall(error.message);
-                yield* logUpdaterError(error.message, {
-                  errorTag: error._tag,
-                  cause: describeUpdateErrorCause(error.cause),
-                  channel: error.channel,
-                  isSilent: error.isSilent,
-                  isForceRunAfter: error.isForceRunAfter,
-                });
+                yield* logInstallError(error);
                 return { accepted: true, completed: false, failed: true };
               },
             ),

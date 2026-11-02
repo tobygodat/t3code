@@ -119,6 +119,30 @@ describe("DesktopRemoteUpdates", () => {
     );
   });
 
+  it.effect("refuses remote updates on a fork host before touching its updater", () => {
+    const harness = makeHarness({ kind: "fork", beforeSetUpdateChannel: Effect.void });
+
+    return runRemoteUpdatesTest(harness, ({ reports, requests }) =>
+      Effect.gen(function* () {
+        yield* Queue.offer(requests, {
+          ...request("req-fork"),
+          channel: "nightly",
+          targetVersion: "1.2.4-nightly.20261027.1",
+        });
+        yield* settle;
+
+        const terminals = terminalReports(reports);
+        assert.equal(terminals.length, 1);
+        assert.equal(terminals[0]?.outcome, "failed");
+        assert.equal(terminals[0]?.requestId, "req-fork");
+        assert.equal(terminals[0]?.state.channel, "latest");
+        assert.equal(harness.checkCount(), 0);
+        assert.equal(harness.downloadCount(), 0);
+        assert.equal(harness.quitAndInstalls(), 0);
+      }),
+    );
+  });
+
   it.effect("switches to the requested track before preparing its release", () => {
     // In-memory settings keep the channel write off real disk I/O.
     const harness = makeHarness({ beforeSetUpdateChannel: Effect.void });

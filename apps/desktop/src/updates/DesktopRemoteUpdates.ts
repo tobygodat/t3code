@@ -17,6 +17,7 @@ import * as Stream from "effect/Stream";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 import {
@@ -50,9 +51,11 @@ export const listen: Effect.Effect<
   | DesktopUpdates.DesktopUpdates
   | DesktopTelemetryPublisher.DesktopTelemetryPublisher
   | DesktopBackendPool.DesktopBackendPool
+  | ElectronUpdater.ElectronUpdater
   | Scope.Scope
 > = Effect.gen(function* () {
   const updates = yield* DesktopUpdates.DesktopUpdates;
+  const { kind: updaterKind } = yield* ElectronUpdater.ElectronUpdater;
   const backends = yield* DesktopBackendPool.DesktopBackendPool;
   const publisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
   const activeRequestIdRef = yield* Ref.make(Option.none<string>());
@@ -157,6 +160,19 @@ export const listen: Effect.Effect<
           ] as const;
         });
         if (!shouldStart) return;
+        // A remote client must not start a build from source and then restart this host.
+        if (updaterKind === "fork") {
+          yield* publishReport(
+            yield* updates.getState,
+            {
+              outcome: "failed",
+              reason:
+                "T3 Code Fork builds its updates from source. Update it from the app on that Mac.",
+            },
+            request.requestId,
+          );
+          return;
+        }
 
         const now = yield* Clock.currentTimeMillis;
         const prepared = yield* Ref.modify(preparedUpdateRef, (current) =>

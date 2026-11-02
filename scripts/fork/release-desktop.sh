@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds the fork's desktop app from origin/main and installs it as
 # "T3 Code Fork" in ~/Applications, beside the official app. The bundle gets
-# its own ID, data folder and keychain item, no URL schemes and no updater.
+# its own ID, data folder and keychain item, no URL schemes and no update feed.
+# The app updates itself by running this script; see FORK.md.
 #
 #   scripts/fork/release-desktop.sh [--ref <commit-ish>] [--force]
 #   scripts/fork/release-desktop.sh --install-staged
@@ -386,6 +387,17 @@ plutil -insert T3CODE_DISABLE_AUTO_UPDATE -string 1 "$env_plist"
 plutil -insert T3CODE_DESKTOP_STAGE_LABEL -string Fork "$env_plist"
 plutil -convert json -r -o "$app/Contents/Resources/desktop-env.json" "$env_plist"
 rm "$env_plist"
+
+# Read by apps/desktop/src/fork/ForkUpdater.ts: the in-app updater builds from this checkout and
+# stages into these folders. The main checkout outlives any worktree the script ran from.
+release_plist="$tmp/fork-release.plist"
+plutil -create xml1 "$release_plist"
+plutil -insert repo -string "$(dirname "$common_dir")" "$release_plist"
+plutil -insert commit -string "$commit" "$release_plist"
+plutil -insert installPath -string "$install_path" "$release_plist"
+plutil -insert releasesDir -string "$releases" "$release_plist"
+plutil -convert json -r -o "$app/Contents/Resources/fork-release.json" "$release_plist"
+rm "$release_plist"
 
 plist="$app/Contents/Info.plist"
 "$plist_buddy" -c "Set :CFBundleIdentifier $bundle_id" "$plist"

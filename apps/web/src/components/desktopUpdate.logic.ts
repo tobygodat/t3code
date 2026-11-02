@@ -31,7 +31,8 @@ export function getDesktopUpdateReleaseUrl(
   repository: string | undefined = import.meta.env.T3CODE_DESKTOP_UPDATE_REPOSITORY,
 ): string | null {
   const normalizedVersion = version?.trim();
-  if (!normalizedVersion) return null;
+  // Only a release has a release page; a fork update is named by its commit.
+  if (!normalizedVersion || !/^\d+\.\d+\.\d+/.test(normalizedVersion)) return null;
   return `${desktopReleaseRepositoryUrl(repository)}/tag/v${encodeURIComponent(normalizedVersion)}`;
 }
 
@@ -152,11 +153,32 @@ export function getDesktopUpdateDisabledReason(
   return state.message?.trim() || "Automatic updates are not available in this build.";
 }
 
+/** On the fork a failed check leaves nothing to download or install, so its reason is all there is to show. */
+export function getDesktopUpdateCheckError(
+  state: Pick<
+    DesktopUpdateState,
+    "status" | "message" | "errorContext" | "downloadedVersion"
+  > | null,
+  isForkBuild: boolean,
+): string | null {
+  if (!isForkBuild || state?.status !== "error") return null;
+  const failedCheck =
+    state.errorContext === "check" ||
+    (state.errorContext === null && state.downloadedVersion === null);
+  return failedCheck ? state.message?.trim() || null : null;
+}
+
 export function getDesktopUpdateIdleTooltip(
-  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+  state: Pick<
+    DesktopUpdateState,
+    "enabled" | "status" | "message" | "errorContext" | "downloadedVersion"
+  > | null,
+  isForkBuild: boolean,
 ) {
   const disabledReason = getDesktopUpdateDisabledReason(state);
-  return disabledReason
-    ? { title: "Updates unavailable", detail: disabledReason }
-    : { title: "Check for updates", detail: null };
+  if (disabledReason) return { title: "Updates unavailable", detail: disabledReason };
+  const checkError = getDesktopUpdateCheckError(state, isForkBuild);
+  if (checkError === null) return { title: "Check for updates", detail: null };
+  const title = state?.errorContext === "check" ? "Update check failed" : "Updater error";
+  return { title, detail: checkError };
 }

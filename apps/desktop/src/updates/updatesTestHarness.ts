@@ -18,6 +18,7 @@ import * as DesktopUpdates from "./DesktopUpdates.ts";
 export const flushCallbacks = Effect.yieldNow;
 
 export interface UpdatesHarnessOptions {
+  readonly kind?: ElectronUpdater.ElectronUpdater["Service"]["kind"];
   readonly checkForUpdates?: Effect.Effect<
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
@@ -26,6 +27,10 @@ export interface UpdatesHarnessOptions {
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly downloadUpdate?: Effect.Effect<void>;
+  readonly installPreflight?: Effect.Effect<
+    void,
+    ElectronUpdater.ElectronUpdaterQuitAndInstallError
+  >;
   readonly quitAndInstall?: Effect.Effect<void, ElectronUpdater.ElectronUpdaterQuitAndInstallError>;
   readonly stopBackend?: Effect.Effect<void>;
   readonly startBackend?: Effect.Effect<void>;
@@ -71,7 +76,10 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     }
   };
 
+  const installPreflight = options.installPreflight;
   const layerUpdater = Layer.succeed(ElectronUpdater.ElectronUpdater, {
+    kind: options.kind ?? "electron-updater",
+    ...(installPreflight === undefined ? {} : { installPreflight: () => installPreflight }),
     setFeedURL: (options) =>
       Effect.sync(() => {
         feedUrls.push(options);
